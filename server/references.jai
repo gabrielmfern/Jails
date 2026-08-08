@@ -75,6 +75,54 @@ handle_references :: (request: LSP_Request_Message_References) {
     lsp_respond(request.id, locations);
 }
 
+handle_document_highlight :: (request: LSP_Request_Message_Document_Highlight) {
+    push_allocator(temp);
+
+    file_path := normalize_path(request.params.textDocument.uri);
+    file := get_file(file_path);
+    if !file {
+        lsp_respond(request.id, null);
+        return;
+    }
+
+    cursor_location := lsp_location_to_node_location(request.params.position, file_path);
+    target_name, target_decls, ok := cursor_target(file, cursor_location);
+    if !ok || target_decls.count == 0 {
+        lsp_respond(request.id, null);
+        return;
+    }
+
+    highlights: [..]LSP_Document_Highlight;
+
+    add_highlight :: (highlights: *[..]LSP_Document_Highlight, location: Node.Location) {
+        range := node_location_to_lsp_location(location).range;
+
+        for highlights.* {
+            if it.range.start.line == range.start.line && it.range.start.character == range.start.character return;
+        }
+
+        array_add(highlights, .{ range=range });
+    }
+
+    for decl: target_decls {
+        if decl.location.file == file_path add_highlight(*highlights, decl.location);
+    }
+
+    for node: file.nodes {
+        if node.kind != .IDENTIFIER continue;
+
+        ident := cast(*Identifier) node;
+        if ident.name != target_name continue;
+
+        decls := resolve_identifier_decls(ident, resolve_procedure_calls=false);
+        if decls_intersect(target_decls, decls) {
+            add_highlight(*highlights, ident.location);
+        }
+    }
+
+    lsp_respond(request.id, highlights);
+}
+
 handle_implementation :: (request: LSP_Request_Message_Implementation) {
     push_allocator(temp);
 

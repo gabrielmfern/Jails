@@ -498,6 +498,7 @@ LSP_Result_Initialize :: struct {
         renameProvider := true;
         referencesProvider := true;
         implementationProvider := true;
+        documentHighlightProvider := true;
 
         signatureHelpProvider: struct {
             triggerCharacters   := string.["("];
@@ -539,6 +540,16 @@ LSP_Request_Message_References :: struct {
 LSP_Request_Message_Implementation :: struct {
     using request: LSP_Request_Message;
     params: LSP_Text_Document_Position;
+}
+
+LSP_Request_Message_Document_Highlight :: struct {
+    using request: LSP_Request_Message;
+    params: LSP_Text_Document_Position;
+}
+
+LSP_Document_Highlight :: struct {
+    range: LSP_Range;
+    kind: s64 = 1;
 }
 
 LSP_Request_Message_Hover :: struct {

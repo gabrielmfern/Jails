@@ -385,6 +385,15 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
 
             handle_implementation(body);
 
+        case "textDocument/documentHighlight";
+            success, body := json_parse_string(raw_request, LSP_Request_Message_Document_Highlight,, temp);
+            if !success {
+                log_error("Unable to parse textDocument/documentHighlight message");
+                return;
+            }
+
+            handle_document_highlight(body);
+
         case "textDocument/didSave";
             success, body := json_parse_string(raw_request, LSP_Did_Save_Text_Document,, temp);
             if !success {
