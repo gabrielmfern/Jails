@@ -27,6 +27,7 @@ handle_hover :: (request: LSP_Request_Message_Hover) {
     }
 
     text := to_string(decl);
+    if ends_with(text, " :: ") text.count -= 4;
     if decl.expression {
         if decl.expression.kind == {
             case .STRUCT; text = tprint("% :: struct", decl.name);

@@ -44,9 +44,17 @@ handle_references :: (request: LSP_Request_Message_References) {
 
     locations: [..]LSP_Location;
 
+    add_location :: (locations: *[..]LSP_Location, location: LSP_Location) {
+        for locations.* {
+            if it.uri == location.uri && it.range.start.line == location.range.start.line && it.range.start.character == location.range.start.character return;
+        }
+
+        array_add(locations, location);
+    }
+
     if request.params._context.includeDeclaration {
         for decl: target_decls {
-            array_add(*locations, node_location_to_lsp_location(decl.location));
+            add_location(*locations, node_location_to_lsp_location(decl.location));
         }
     }
 
@@ -59,7 +67,7 @@ handle_references :: (request: LSP_Request_Message_References) {
 
             other_decls := resolve_identifier_decls(other_ident, resolve_procedure_calls=false);
             if decls_intersect(target_decls, other_decls) {
-                array_add(*locations, node_location_to_lsp_location(other_ident.location));
+                add_location(*locations, node_location_to_lsp_location(other_ident.location));
             }
         }
     }

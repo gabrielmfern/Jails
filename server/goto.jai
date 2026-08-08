@@ -425,6 +425,15 @@ resolve_procedure_call_decl :: (ident: *Identifier) -> *Declaration {
     return procedure_decls[best_override_index];
 }
 
+resolve_enum_member :: (ident: *Identifier) -> *Declaration {
+    if !ident.parent || ident.parent.kind != .BLOCK return null;
+
+    block := cast(*Block) ident.parent;
+    if !block.parent || block.parent.kind != .ENUM return null;
+
+    return get_member_in(block.parent, ident);
+}
+
 resolve_identifier_decls :: (ident: *Identifier, resolve_procedure_calls := true) -> []*Declaration {
     single :: (decl: *Declaration) -> []*Declaration {
         decls := NewArray(1, *Declaration);
@@ -432,7 +441,10 @@ resolve_identifier_decls :: (ident: *Identifier, resolve_procedure_calls := true
         return decls;
     }
 
-    decl := resolve_named_argument(ident);
+    decl := resolve_enum_member(ident);
+    if decl return single(decl);
+
+    decl = resolve_named_argument(ident);
     if decl return single(decl);
 
     decl = resolve_struct_literal_member(ident);
