@@ -1,48 +1,41 @@
-// handle_hover :: (request: LSP_Request_Message_Hover) {
-//     push_allocator(temp);
+handle_hover :: (request: LSP_Request_Message_Hover) {
+    push_allocator(temp);
 
-//     file_path := normalize_path(request.params.textDocument.uri);
+    file_path := normalize_path(request.params.textDocument.uri);
 
-//     file := get_file(file_path);
-//     if !file {
-//         lsp_respond(request.id, null);
-//         return;
-//     }
+    file := get_file(file_path);
+    if !file {
+        lsp_respond(request.id, null);
+        return;
+    }
 
-//     cursor_location := lsp_location_to_node_location(request.params.position, file_path);
-//     cursor_block := cast(*Block) get_node_by_location(file, cursor_location, .BLOCK);
-//     cursor_node := get_node_by_location(file, cursor_location);
+    cursor_location := lsp_location_to_node_location(request.params.position, file_path);
+    cursor_node := get_node_by_location(file, cursor_location);
 
-//     if !cursor_node {
-//         lsp_respond(request.id, null);
-//         return;
-//     }
+    decl: *Declaration;
 
-//     if cursor_node.kind != .IDENTIFIER {
-//         lsp_respond(request.id, null);
-//         return;
-//     }
+    if cursor_node && cursor_node.kind == .DECLARATION {
+        decl = cast(*Declaration) cursor_node;
+    } else if cursor_node && cursor_node.kind == .IDENTIFIER {
+        decls := resolve_identifier_decls(cast(*Identifier) cursor_node);
+        if decls.count > 0 decl = decls[0];
+    }
 
-//     ident := cast(*Identifier) cursor_node;
+    if !decl {
+        lsp_respond(request.id, null);
+        return;
+    }
 
-//     builder: String_Builder;
+    text := to_string(decl);
+    if decl.expression {
+        if decl.expression.kind == {
+            case .STRUCT; text = tprint("% :: struct", decl.name);
+            case .ENUM;   text = tprint("% :: enum", decl.name);
+            case .UNION;  text = tprint("% :: union", decl.name);
+        }
+    }
 
-//     if ident.parent && ident.parent.kind == .BINARY_OPERATION {
-//         result := goto_dot_path_member(file, xx ident.parent, ident);
-//         if result {
-//             ast_print(*builder, result);
-//             lsp_respond(request.id, LSP_Hover.{ contents=builder_to_string(*builder) });
-//             return;
-//         }
-//     }
-
-//     type := get_node_type(file, ident);
-//     if !type {
-//         lsp_respond(request.id, null);
-//         return;
-//     }
-
-
-//     ast_print(*builder, type);
-//     lsp_respond(request.id, LSP_Hover.{ contents=builder_to_string(*builder) });
-// }
+    hover: LSP_Hover;
+    hover.contents.value = tprint("```jai\n%\n```", text);
+    lsp_respond(request.id, hover);
+}

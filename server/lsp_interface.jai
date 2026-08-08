@@ -229,10 +229,7 @@ LSP_Annotation_Text_Edit :: struct {
 
 LSP_Text_Document_Edit :: struct {
     textDocument: LSP_Optinal_Versioned_Text_Document_Identifier;
-    edits: [] union {
-        textEdit: LSP_Text_Edit;
-        annotatedTextEdit: LSP_Annotation_Text_Edit;
-    };
+    edits: []LSP_Text_Edit;
 }
 
 
@@ -497,7 +494,8 @@ LSP_Result_Initialize :: struct {
         workspaceSymbolProvider := true;
 
         definitionProvider := true;
-        // hoverProvider := true;
+        hoverProvider := true;
+        renameProvider := true;
 
         signatureHelpProvider: struct {
             triggerCharacters   := string.["("];
@@ -529,6 +527,14 @@ LSP_Request_Message_Definition :: struct {
 LSP_Request_Message_Hover :: struct {
     using request: LSP_Request_Message;
     params: LSP_Text_Document_Position;
+}
+
+LSP_Request_Message_Rename :: struct {
+    using request: LSP_Request_Message;
+    params: struct {
+        using base: LSP_Text_Document_Position;
+        newName: string;
+    }
 }
 
 LSP_Request_Message_Completion :: struct {
@@ -632,8 +638,10 @@ LSP_Completion_Item :: struct {
 }
 
 LSP_Hover :: struct {
-    contents: string;
-    contentFormat:= "markdown";
+    contents: struct {
+        kind := "markdown";
+        value: string;
+    };
 }
 
 LSP_Folding_Range_Client_Capabilities :: struct {
