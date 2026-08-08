@@ -806,6 +806,9 @@ lsp_window_message :: (format: string, args: ..Any, type: LSP_Window_Show_Messag
 lsp_send :: (data: $T) {
     body := json_write_string(data);
     defer free(body);
+
+    lock(*server.stdout_lock);
+    defer unlock(*server.stdout_lock);
     print("Content-Length: %\r\n\r\n%", body.count, body);
 }
 

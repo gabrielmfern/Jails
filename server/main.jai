@@ -41,6 +41,12 @@ Server :: struct {
     previously_errored_file: string;
 
     diagnostics_metaprogram_path: string;
+    diagnostics_thread: Thread;
+    diagnostics_lock: Mutex;
+    diagnostics_requested: bool;
+    diagnostics_request_time: float64;
+
+    stdout_lock: Mutex;
 
     user_options: User_Options;
 }
@@ -356,7 +362,7 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
             to_send: LSP_Result_Initialize;
             lsp_respond(body.id, to_send);
 
-            run_diagnostics();
+            request_diagnostics();
 
         case "textDocument/definition";
             success, body := json_parse_string(raw_request, LSP_Request_Message_Definition,, temp);
@@ -401,7 +407,7 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
                 return;
             }
 
-            run_diagnostics();
+            request_diagnostics();
 
             file_path := normalize_path(body.params.textDocument.uri,, temp);
 
@@ -519,6 +525,7 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
 }
 
 main :: () {
+    init(*server.stdout_lock);
     context.logger = lsp_log;
 
     success: bool;
@@ -538,6 +545,10 @@ main :: () {
         }
     }
 
+    if server.args.jai_exe_name.count == 0 {
+        server.args.jai_exe_name = DEFAULT_JAI_EXE_NAME;
+    }
+
     log("Args are %", server.args);
 
     defer deinit(*server.files);
@@ -548,6 +559,8 @@ main :: () {
 
     init_memory_files();
     defer deinit_memory_files();
+
+    start_diagnostics_thread();
 
     while !server.quit {
         body, success := read_message_from_stdin(,, temp);

@@ -1,4 +1,45 @@
 // This file contains code for running compiler for getting errors and warning.
+//
+// The compiler run is slow (up to a few seconds), so it happens on a background
+// thread. Requests are debounced so rapid saves coalesce into one run.
+
+DIAGNOSTICS_DEBOUNCE_SECONDS :: 0.3;
+
+request_diagnostics :: () {
+    lock(*server.diagnostics_lock);
+    server.diagnostics_requested = true;
+    server.diagnostics_request_time = seconds_since_init();
+    unlock(*server.diagnostics_lock);
+}
+
+start_diagnostics_thread :: () {
+    init(*server.diagnostics_lock);
+    thread_init(*server.diagnostics_thread, diagnostics_thread_proc);
+    thread_start(*server.diagnostics_thread);
+}
+
+diagnostics_thread_proc :: (thread: *Thread) -> s64 {
+    context.logger = lsp_log;
+
+    while !server.quit {
+        sleep_milliseconds(100);
+
+        run := false;
+        lock(*server.diagnostics_lock);
+        if server.diagnostics_requested && seconds_since_init() - server.diagnostics_request_time >= DIAGNOSTICS_DEBOUNCE_SECONDS {
+            server.diagnostics_requested = false;
+            run = true;
+        }
+        unlock(*server.diagnostics_lock);
+
+        if run {
+            run_diagnostics();
+            reset_temporary_storage();
+        }
+    }
+
+    return 0;
+}
 
 reset_diagnostics :: () {
     if server.previously_errored_file {
@@ -54,7 +95,7 @@ run_diagnostics :: () {
 
     reset_diagnostics();
 
-    result, _, error := run_command(..command, working_directory=server.project_root, capture_and_return_output=true, timeout_ms=2500);
+    result, _, error := run_command(..command, working_directory=server.project_root, capture_and_return_output=true, timeout_ms=10000);
     if result.exit_code == 0 {
         return;
     }
@@ -95,6 +136,8 @@ run_diagnostics :: () {
         diagnostic.range.start.line = line-1;
         diagnostic.range.start.character = character-1;
     }
+
+    if diagnostic.message.count == 0 return;
 
     highlight_found := false;
     highlighted_chars: u32;
