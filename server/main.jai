@@ -506,6 +506,15 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
             }
 
             handle_rename(body);
+
+        case "textDocument/prepareRename";
+            success, body := json_parse_string(raw_request, LSP_Request_Message_Prepare_Rename,, temp);
+            if !success {
+                log_error("Unable to parse textDocument/prepareRename message");
+                return;
+            }
+
+            handle_prepare_rename(body);
     }
 }
 

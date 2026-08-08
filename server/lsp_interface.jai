@@ -495,7 +495,9 @@ LSP_Result_Initialize :: struct {
 
         definitionProvider := true;
         hoverProvider := true;
-        renameProvider := true;
+        renameProvider: struct {
+            prepareProvider := true;
+        };
         referencesProvider := true;
         implementationProvider := true;
         documentHighlightProvider := true;
@@ -563,6 +565,11 @@ LSP_Request_Message_Rename :: struct {
         using base: LSP_Text_Document_Position;
         newName: string;
     }
+}
+
+LSP_Request_Message_Prepare_Rename :: struct {
+    using request: LSP_Request_Message;
+    params: LSP_Text_Document_Position;
 }
 
 LSP_Request_Message_Completion :: struct {
