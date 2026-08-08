@@ -54,6 +54,10 @@ handle_completitions :: (request: LSP_Request_Message_Completion) {
             return;
         }
 
+        if handle_enum_literal_completions(request, cursor_node) {
+            return;
+        }
+
         // if handle_completitions_procedure_call(request, file, cursor_node, *cursor_location) {
         //     return;
         // }
@@ -298,6 +302,24 @@ handle_assignment_completitions :: (request: LSP_Request_Message_Completion, cur
     }
 
     return handle_completitions_for_node(request, left_type);
+}
+
+handle_enum_literal_completions :: (request: LSP_Request_Message_Completion, cursor_node: *Node) -> bool {
+    unary_op: *Unary_Operation;
+    if cursor_node.kind == .UNARY_OPERATION {
+        unary_op = cast(*Unary_Operation) cursor_node;
+    } else if cursor_node.parent && cursor_node.parent.kind == .UNARY_OPERATION {
+        unary_op = cast(*Unary_Operation) cursor_node.parent;
+    } else {
+        return false;
+    }
+
+    enum_type := get_enum_literal_type(unary_op);
+    if !enum_type {
+        return false;
+    }
+
+    return handle_completitions_for_node(request, enum_type);
 }
 
 handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node: *Node) -> bool {

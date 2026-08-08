@@ -4,7 +4,15 @@ resolve_enum_literal :: (ident: *Identifier) -> *Declaration {
         return null;
     }
 
-    unary_op := cast(*Unary_Operation) ident.parent;
+    enum_type := get_enum_literal_type(cast(*Unary_Operation) ident.parent);
+    if !enum_type {
+        return null;
+    }
+
+    return get_member_in(enum_type, ident);
+}
+
+get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
     if unary_op.operation != .DOT {
         return null;
     }
@@ -188,7 +196,7 @@ resolve_enum_literal :: (ident: *Identifier) -> *Declaration {
         return null;
     }
 
-    return get_member_in(enum_type, ident);
+    return enum_type;
 }
 
 handle_goto_load :: (request: LSP_Request_Message_Definition, file: *Program_File, _load: *Directive_Load) {
