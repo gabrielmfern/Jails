@@ -42,6 +42,10 @@ handle_completitions :: (request: LSP_Request_Message_Completion) {
             return;
         }
 
+        if handle_struct_literal_completions(request, cursor_node) {
+            return;
+        }
+
         if handle_assignment_completitions(request, cursor_node) {
             return;
         }
@@ -302,6 +306,38 @@ handle_assignment_completitions :: (request: LSP_Request_Message_Completion, cur
     }
 
     return handle_completitions_for_node(request, left_type);
+}
+
+handle_struct_literal_completions :: (request: LSP_Request_Message_Completion, cursor_node: *Node) -> bool {
+    literal: *Literal;
+    if cursor_node.kind == .LITERAL {
+        literal = cast(*Literal) cursor_node;
+    } else if cursor_node.kind == .IDENTIFIER {
+        field := cursor_node;
+        if field.parent && field.parent.kind == .BINARY_OPERATION {
+            binary_op := cast(*Binary_Operation) field.parent;
+            if binary_op.operation != .ASSIGN || binary_op.left != field {
+                return false;
+            }
+
+            field = binary_op;
+        }
+
+        if !field.parent || field.parent.kind != .LITERAL {
+            return false;
+        }
+
+        literal = cast(*Literal) field.parent;
+    } else {
+        return false;
+    }
+
+    type := get_struct_literal_type(literal);
+    if !type || literal.struct_literal_info.type == cursor_node {
+        return false;
+    }
+
+    return handle_completitions_for_node(request, type);
 }
 
 handle_enum_literal_completions :: (request: LSP_Request_Message_Completion, cursor_node: *Node) -> bool {

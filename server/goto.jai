@@ -4,12 +4,12 @@ resolve_enum_literal :: (ident: *Identifier) -> *Declaration {
         return null;
     }
 
-    enum_type := get_enum_literal_type(cast(*Unary_Operation) ident.parent);
-    if !enum_type {
+    expected_type := get_enum_literal_type(cast(*Unary_Operation) ident.parent);
+    if !expected_type {
         return null;
     }
 
-    return get_member_in(enum_type, ident);
+    return get_member_in(expected_type, ident);
 }
 
 get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
@@ -17,14 +17,23 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
         return null;
     }
 
-    if !unary_op.parent {
+    type := get_expected_type(unary_op);
+    if !type || type.kind != .ENUM {
+        return null;
+    }
+
+    return type;
+}
+
+get_expected_type :: (node: *Node) -> *Node {
+    if !node.parent {
         return null;
     }
 
     // Check what context the enum literal is in
-    parent_node := unary_op.parent;
+    parent_node := node.parent;
     original_parent_node := parent_node;
-    enum_type: *Node;
+    expected_type: *Node;
 
     // For enum_flags with OR/AND operations in .PROCEDURE_CALL arguments, traverse up to find the actual context
     while parent_node && parent_node.kind == .BINARY_OPERATION {
@@ -55,8 +64,8 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
             // Find which argument contains our enum literal (might be nested in OR or AND operations if it's an enum_flag)
             arg_index := -1;
             for arg, index: proc_call.arguments {
-                // Check if our unary_op is somewhere within this argument
-                if is_parent_of(arg, unary_op) {
+                // Check if our node is somewhere within this argument
+                if is_parent_of(arg, node) {
                     arg_index = index;
                     break;
                 }
@@ -80,7 +89,7 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
                             if unwrapped && unwrapped.kind == .DECLARATION {
                                 param_decl := cast(*Declaration) unwrapped;
                                 if param_decl.type_inst {
-                                    enum_type = get_node_type(param_decl.type_inst);
+                                    expected_type = get_node_type(param_decl.type_inst);
                                 }
                             }
                         }
@@ -94,7 +103,7 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
         decl := cast(*Declaration) parent_node;
 
         if decl.type_inst {
-            enum_type = get_node_type(decl.type_inst);
+            expected_type = get_node_type(decl.type_inst);
         }
 
     } else if parent_node.kind == .BINARY_OPERATION {
@@ -113,7 +122,7 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
                     if left_type {
                         decl := get_member_in(left_type, operation_ident);
                         if decl {
-                            enum_type = get_node_type(decl);
+                            expected_type = get_node_type(decl);
                         }
                     }
                 }
@@ -121,17 +130,22 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
         }
 
         // If not found yet, handle normal cases
-        if !enum_type {
+        if !expected_type {
             if binary_op.operation == .ASSIGN {
                 // For: se = .B or flags = .SPIRV | .MSL
                 // Also handles: ident.parent.kind = .UNARY_OPERATION
 
-                if binary_op.left && binary_op.left.kind == .BINARY_OPERATION {
+                if binary_op.left && binary_op.left.kind == .IDENTIFIER && binary_op.parent && binary_op.parent.kind == .LITERAL {
+                    member := resolve_struct_literal_member(cast(*Identifier) binary_op.left);
+                    if member {
+                        expected_type = get_node_type(member);
+                    }
+                } else if binary_op.left && binary_op.left.kind == .BINARY_OPERATION {
                     // Left side is a member access chain
                     member_access := cast(*Binary_Operation) binary_op.left;
                     if member_access.operation == .DOT {
                         // Get the type of the entire member access chain
-                        enum_type = get_node_type(member_access);
+                        expected_type = get_node_type(member_access);
                     }
                 } else if binary_op.left && binary_op.left.kind == .IDENTIFIER {
                     // Left side is a simple identifier
@@ -143,11 +157,11 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
                         if decl.expression && decl.expression.kind == .BINARY_OPERATION {
                             member_access := cast(*Binary_Operation) decl.expression;
                             if member_access.operation == .DOT && member_access.left {
-                                enum_type = get_node_type(member_access.left);
+                                expected_type = get_node_type(member_access.left);
                             }
                         }
-                        if !enum_type && decl.type_inst {
-                            enum_type = get_node_type(decl.type_inst);
+                        if !expected_type && decl.type_inst {
+                            expected_type = get_node_type(decl.type_inst);
                         }
                     }
                 }
@@ -155,7 +169,7 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
                       binary_op.operation == .LOGICAL_AND || binary_op.operation == .LOGICAL_OR   ||
                       binary_op.operation == .PIPE        || binary_op.operation == .BITWISE_AND {
                 other_side: *Node;
-                if binary_op.left == unary_op {
+                if binary_op.left == node {
                     other_side = binary_op.right;
                 } else {
                     other_side = binary_op.left;
@@ -165,7 +179,7 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
                 if other_side && other_side.kind == .BINARY_OPERATION {
                     member_chain := cast(*Binary_Operation) other_side;
                     if member_chain.operation == .DOT {
-                        enum_type = get_node_type(other_side);
+                        expected_type = get_node_type(other_side);
                     }
                 } else if other_side && other_side.kind == .IDENTIFIER {
                     other_ident := cast(*Identifier) other_side;
@@ -176,27 +190,23 @@ get_enum_literal_type :: (unary_op: *Unary_Operation) -> *Node {
                         if decl.expression && decl.expression.kind == .BINARY_OPERATION {
                             member_access := cast(*Binary_Operation) decl.expression;
                             if member_access.operation == .DOT && member_access.left {
-                                enum_type = get_node_type(member_access.left);
+                                expected_type = get_node_type(member_access.left);
                             }
                         }
-                        if !enum_type && decl.type_inst {
-                            enum_type = get_node_type(decl.type_inst);
+                        if !expected_type && decl.type_inst {
+                            expected_type = get_node_type(decl.type_inst);
                         }
                     }
                 }
 
-                if !enum_type {
-                    enum_type = get_node_type(other_side);
+                if !expected_type {
+                    expected_type = get_node_type(other_side);
                 }
             }
         }
     }
 
-    if !enum_type || enum_type.kind != .ENUM {
-        return null;
-    }
-
-    return enum_type;
+    return expected_type;
 }
 
 handle_goto_load :: (request: LSP_Request_Message_Definition, file: *Program_File, _load: *Directive_Load) {
@@ -348,25 +358,31 @@ resolve_struct_literal_member :: (ident: *Identifier) -> *Declaration {
 
     literal := cast(*Literal) binary_op.parent;
 
-    // TODO: Infer the type for .{} structs literals...
-    if literal.value_type != .STRUCT || !literal.struct_literal_info.type || literal.struct_literal_info.type.kind != .IDENTIFIER {
+    type := get_struct_literal_type(literal);
+    if !type {
         return null;
     }
 
-    // We need to resolve struct literal type.
-    decls := get_identifier_decls(cast(*Identifier) literal.struct_literal_info.type);
-    if decls.count == 0 {
+    return get_member_in(type, ident);
+}
+
+get_struct_literal_type :: (literal: *Literal) -> *Node {
+    if literal.value_type != .STRUCT {
         return null;
     }
 
-    struct_decl := decls[0];
-    if !struct_decl.expression {
+    type: *Node;
+    if literal.struct_literal_info.type {
+        type = get_node_type(literal.struct_literal_info.type);
+    } else {
+        type = get_expected_type(literal);
+    }
+
+    if !type || type.kind != .STRUCT {
         return null;
     }
 
-    _struct := cast(*Struct) struct_decl.expression;
-
-    return get_member_in(_struct, ident);
+    return type;
 }
 
 resolve_assignment_member :: (ident: *Identifier) -> *Declaration {
