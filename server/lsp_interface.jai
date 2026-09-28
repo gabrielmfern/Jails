@@ -498,6 +498,9 @@ LSP_Result_Initialize :: struct {
             range := true;
         };
         inlayHintProvider := true;
+        codeActionProvider: struct {
+            codeActionKinds := string.["quickfix"];
+        };
         documentSymbolProvider := true;
         workspaceSymbolProvider := true;
 
@@ -565,6 +568,17 @@ LSP_Request_Message_Inlay_Hint :: struct {
     params: struct {
         textDocument: LSP_Text_Document_Identifier;
         range: LSP_Range;
+    }
+}
+
+LSP_Request_Message_Code_Action :: struct {
+    using request: LSP_Request_Message;
+    params: struct {
+        textDocument: LSP_Text_Document_Identifier;
+        range: LSP_Range;
+        _context: struct {
+            diagnostics: []LSP_Diagnostic;
+        } @JsonName(context)
     }
 }
 
