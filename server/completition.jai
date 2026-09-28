@@ -239,13 +239,13 @@ handle_dot_completitions :: (request: LSP_Request_Message_Completion, cursor_nod
 
     array_reverse(path);
 
-    type, pointer := get_path_type(path);
+    type, _, _, pointer_depth := get_path_type(path);
     if !type {
         lsp_respond(request.id, null);
         return true;
     }
 
-    return handle_completitions_for_node(request, type, pointer);
+    return handle_completitions_for_node(request, type, pointer_depth);
 }
 
 handle_types_in_declaration :: (request: LSP_Request_Message_Completion, cursor_node: *Node) -> bool {
@@ -358,7 +358,7 @@ handle_enum_literal_completions :: (request: LSP_Request_Message_Completion, cur
     return handle_completitions_for_node(request, enum_type);
 }
 
-handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node: *Node, pointer: *Unary_Operation = null) -> bool {
+handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node: *Node, pointer_depth := 0) -> bool {
     decls: [..]*Declaration;
     defer array_free(decls);
 
@@ -407,10 +407,7 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
 
             if identifier.name == {
                 case "string";
-                    internal_string_struct := get_internal_string_struct();
-                    if internal_string_struct {
-                        return handle_completitions_for_node(request, internal_string_struct, pointer);
-                    }
+                    add_all_fields_of(*decls, get_internal_string_struct());
             }
 
         case .LITERAL;
@@ -418,10 +415,7 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
 
             if literal.value_type == {
                 case .STRING;
-                    internal_string_struct := get_internal_string_struct();
-                    if internal_string_struct {
-                        return handle_completitions_for_node(request, internal_string_struct, pointer);
-                    }
+                    add_all_fields_of(*decls, get_internal_string_struct());
 
                 case .ARRAY;
                     array_literal_info := literal.values.array_literal_info;
@@ -447,24 +441,10 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
     //     return false;
     // }
 
-    pointee_name :: (pointer: *Unary_Operation, resolved: *Node) -> string {
-        type, inner := get_node_type(pointer.expression);
-        if inner return tprint("*%", pointee_name(inner, resolved));
-        if !type || type.kind == .IDENTIFIER && get_base_type_from_ident_or_literal(type) == .UNKNOWN type = resolved;
-
-        if type && type.parent && type.parent.kind == .DECLARATION && (cast(*Declaration) type.parent).expression == type {
-            return (cast(*Declaration) type.parent).name;
-        }
-
-        builder: String_Builder;
-        ast_print(*builder, type);
-        return builder_to_string(*builder,, temp);
-    }
-
     deref_decl: Declaration;
     deref_type: Identifier;
-    if pointer {
-        deref_type.name = pointee_name(pointer, node);
+    if pointer_depth > 0 {
+        deref_type.name = type_name(node, pointer_depth - 1);
         deref_decl = .{name = "*", type_inst = *deref_type};
         array_add(*decls, *deref_decl);
     }
@@ -597,7 +577,12 @@ send_completions_decls :: (request: LSP_Request_Message_Completion, decls: []*De
 
             case;
                 item.kind = xx LSP_Completion_Item.Kind.Variable;
-                item.labelDetails.description = ast_print_to_string(preview_node);
+                if !decl.parent && decl.type_inst {
+                    type, _, _, depth := get_node_type(decl);
+                    item.labelDetails.description = type_name(type, depth);
+                } else {
+                    item.labelDetails.description = ast_print_to_string(preview_node);
+                }
         }
 
         array_add(*completions, item);

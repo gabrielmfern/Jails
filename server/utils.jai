@@ -12,6 +12,19 @@ to_string :: (node: *Node) -> string {
     return builder_to_string(*builder);
 }
 
+type_name :: (type: *Node, pointer_depth: int) -> string {
+    builder: String_Builder;
+    for 1..pointer_depth append(*builder, "*");
+
+    if type && type.parent && type.parent.kind == .DECLARATION && (cast(*Declaration) type.parent).expression == type {
+        append(*builder, (cast(*Declaration) type.parent).name);
+    } else {
+        ast_print(*builder, type);
+    }
+
+    return builder_to_string(*builder,, temp);
+}
+
 to_debug_string :: (node: *Node) -> string {
     if !node {
         return "null";
