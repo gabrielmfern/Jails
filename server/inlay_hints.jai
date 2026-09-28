@@ -1,53 +1,38 @@
-inlay_type_name :: (type: *Node, depth: int, bindings: []Poly_Binding) -> string {
-    if !type return "";
-
-    name: string;
-    if type.kind == {
-        case .IDENTIFIER;
-            name = (cast(*Identifier) type).name;
-            if !array_find(BUILTIN_TYPES, name) return "";
-
-        case .LITERAL;
-            literal := cast(*Literal) type;
-            if literal.value_type == {
-                case .INT;    name = "int";
-                case .FLOAT;  name = "float";
-                case .STRING; name = "string";
-                case .BOOL;   name = "bool";
-                case;         return "";
-            }
-
-        case .STRUCT; #through;
-        case .UNION;  #through;
-        case .ENUM;
-            if !type.parent || type.parent.kind != .DECLARATION return "";
-            name = (cast(*Declaration) type.parent).name;
-
-        case .ARRAY_TYPE;
-            array_type := cast(*Array_Type) type;
-            element, _, element_bindings, element_depth := get_node_type(array_type.element_type, root_bindings = bindings);
-            element_name := inlay_type_name(element, element_depth, element_bindings);
-            if !element_name return "";
-
-            if array_type.resizable {
-                name = tprint("[..]%", element_name);
-            } else if !array_type.dimension {
-                name = tprint("[]%", element_name);
-            } else {
-                dimension := array_type.dimension;
-                if dimension.kind != .LITERAL dimension = get_node_type(dimension, root_bindings = bindings);
-                if !dimension || dimension.kind != .LITERAL || (cast(*Literal) dimension).value_type != .INT return "";
-                name = tprint("[%]%", (cast(*Literal) dimension)._int, element_name);
-            }
-
-        case;
-            return "";
+holds_procedure_or_type :: (expression: *Node, depth := 0) -> bool {
+    while expression && expression.kind == .BINARY_OPERATION && (cast(*Binary_Operation) expression).operation == .DOT {
+        expression = (cast(*Binary_Operation) expression).right;
     }
 
-    builder: String_Builder;
-    for 1..depth append(*builder, "*");
-    append(*builder, name);
-    return builder_to_string(*builder);
+    if !expression || depth > 8 return false;
+
+    if expression.kind == {
+        case .PROCEDURE;                return true;
+        case .DIRECTIVE_BAKE_ARGUMENTS; return true;
+        case .STRUCT;                   return true;
+        case .ENUM;                     return true;
+        case .UNION;                    return true;
+        case .ARRAY_TYPE;               return true;
+        case .DIRECTIVE_TYPE;           return true;
+        case .DIRECTIVE_IMPORT;         return true;
+        case .IDENTIFIER;
+        case;                           return false;
+    }
+
+    ident := cast(*Identifier) expression;
+    decls := resolve_identifier_decls(ident, resolve_procedure_calls=false);
+    if !decls.count {
+        builtin_type := array_find(BUILTIN_TYPES, ident.name);
+        return builtin_type;
+    }
+
+    decl := decls[decls.count-1];
+    if decl.type_inst {
+        if decl.type_inst.kind == .PROCEDURE_CALL return false;
+        type := get_node_type(decl.type_inst, stop_at_procedure=true);
+        return type && type.kind == .PROCEDURE;
+    }
+
+    return holds_procedure_or_type(decl.expression, depth + 1);
 }
 
 handle_inlay_hint :: (request: LSP_Request_Message_Inlay_Hint) {
@@ -65,36 +50,30 @@ handle_inlay_hint :: (request: LSP_Request_Message_Inlay_Hint) {
     line_starts := get_line_starts(content);
     hints: [..]LSP_Inlay_Hint;
 
-    add_hint :: (location: Node.Location, byte_column: int, label: string, kind: int) #expand {
-        line := get_line(content, line_starts, location.l0);
+    add_hint :: (location: Node.Location, byte_column: int, label: string, kind: LSP_Inlay_Hint_Kind) #expand {
+        if location.l0 < xx range.start.line || location.l0 > xx range.end.line return;
+
+        line: string;
+        if location.l0 < line_starts.count line = slice(content, line_starts[location.l0], content.count - line_starts[location.l0]);
         position := LSP_Position.{cast(u32) location.l0, cast(u32) utf16_column(line, byte_column)};
         if position.line == range.start.line && position.character < range.start.character return;
         if position.line == range.end.line && position.character > range.end.character return;
-        array_add(*hints, .{position = position, label = label, kind = kind, paddingRight = kind == 2});
+        array_add(*hints, .{position = position, label = label, kind = xx kind, paddingRight = kind == .PARAMETER});
     }
 
     add_type_hint :: (decl: *Declaration) #expand {
         type, _, bindings, depth := get_node_type(decl);
-        name := inlay_type_name(type, depth, bindings);
-        if name add_hint(decl.location, decl.location.c0 + decl.name.count, tprint(": %", name), 1);
+        name, resolved := type_name(type, depth, bindings);
+        if resolved add_hint(decl.location, decl.location.c0 + decl.name.count, tprint(": %", name), .TYPE);
     }
 
     is_inferred_value :: (decl: *Declaration) -> bool {
-        if !decl.name || decl.type_inst || !decl.expression return false;
-
-        token_type := classify_declaration(decl);
-        if token_type != .VARIABLE && token_type != .PROPERTY && token_type != .PARAMETER return false;
-
-        if decl.expression.kind == .IDENTIFIER {
-            ok, expression_type := classify_identifier(cast(*Identifier) decl.expression);
-            if ok && expression_type != .VARIABLE && expression_type != .PROPERTY && expression_type != .PARAMETER return false;
-        }
-
-        return true;
+        if !decl.name || decl.const || decl.type_inst || !decl.expression || decl.expression == *empty_identifier return false;
+        return !holds_procedure_or_type(decl.expression);
     }
 
     for node: file.nodes {
-        if node.location.l0 < xx range.start.line || node.location.l0 > xx range.end.line continue;
+        if node.location.l1 < xx range.start.line || node.location.l0 > xx range.end.line continue;
 
         if node.kind == .DECLARATION && is_inferred_value(cast(*Declaration) node) add_type_hint(cast(*Declaration) node);
 
@@ -126,15 +105,16 @@ handle_inlay_hint :: (request: LSP_Request_Message_Inlay_Hint) {
                 if value_type != .INT && value_type != .FLOAT && value_type != .BOOL continue;
 
                 if !procedure {
-                    _, procedure = get_procedure_call_decl(call);
-                    if !procedure break;
+                    matched: bool;
+                    _, procedure, matched = get_procedure_call_decl(call);
+                    if !procedure || !matched break;
                     params = get_procedure_parameters(procedure);
                 }
 
                 index := get_argument_parameter(params, arg, it_index);
                 if index < 0 || is_varargs(params[index]) || !params[index].name continue;
 
-                add_hint(arg.location, arg.location.c0, tprint("%:", params[index].name), 2);
+                add_hint(arg.location, arg.location.c0, tprint("%:", params[index].name), .PARAMETER);
             }
         }
     }

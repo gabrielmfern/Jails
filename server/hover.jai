@@ -28,8 +28,8 @@ handle_hover :: (request: LSP_Request_Message_Hover) {
 
     text := to_string(decl);
     if !decl.parent && decl.type_inst {
-        type, _, _, depth := get_node_type(decl);
-        text = tprint("%: %", decl.name, type_name(type, depth));
+        type, _, bindings, depth := get_node_type(decl);
+        text = tprint("%: %", decl.name, type_name(type, depth, bindings));
     }
     if ends_with(text, " :: ") text.count -= 4;
     if decl.expression {

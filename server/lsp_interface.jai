@@ -575,6 +575,11 @@ LSP_Inlay_Hint :: struct {
     paddingRight: bool;
 }
 
+LSP_Inlay_Hint_Kind :: enum s64 {
+    TYPE :: 1;
+    PARAMETER :: 2;
+}
+
 LSP_Request_Message_Document_Highlight :: struct {
     using request: LSP_Request_Message;
     params: LSP_Text_Document_Position;

@@ -199,7 +199,8 @@ handle_semantic_tokens :: (request: LSP_Request_Message_Semantic_Tokens) {
     for tokens {
         if it_index > 0 && it.line == previous.line && it.column < previous.column + previous.length continue;
 
-        line := get_line(content, line_starts, it.line);
+        line: string;
+        if it.line < line_starts.count line = slice(content, line_starts[it.line], content.count - line_starts[it.line]);
         column := utf16_column(line, it.column);
         length := utf16_column(line, it.column + it.length) - column;
 

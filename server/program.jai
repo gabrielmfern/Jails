@@ -2195,9 +2195,9 @@ get_argument_parameter :: (params: []*Declaration, arg: *Node, arg_index: int) -
     return -1;
 }
 
-get_best_overload_for_procedure_call :: (procedures: []*Procedure, call: *Procedure_Call, resolved_args: []Argument_Type = .[]) -> int {
+get_best_overload_for_procedure_call :: (procedures: []*Procedure, call: *Procedure_Call, resolved_args: []Argument_Type = .[]) -> int, matched: bool {
     if procedures.count < 2 {
-        return 0;
+        return 0, true;
     }
 
     args := resolved_args;
@@ -2248,10 +2248,10 @@ get_best_overload_for_procedure_call :: (procedures: []*Procedure, call: *Proced
         }
     }
 
-    return best;
+    return best, best_score >= 0;
 }
 
-get_procedure_call_decl :: (call: *Procedure_Call, args: []Argument_Type = .[]) -> *Declaration, *Procedure {
+get_procedure_call_decl :: (call: *Procedure_Call, args: []Argument_Type = .[]) -> *Declaration, *Procedure, matched: bool = false {
     if !call.procedure || call.procedure.kind != .IDENTIFIER {
         return null, null;
     }
@@ -2272,13 +2272,13 @@ get_procedure_call_decl :: (call: *Procedure_Call, args: []Argument_Type = .[]) 
         return null, null;
     }
 
-    best := get_best_overload_for_procedure_call(procedures, call, args);
+    best, matched := get_best_overload_for_procedure_call(procedures, call, args);
     procedure := procedures[best];
     if procedure.parent && procedure.parent.kind == .DECLARATION {
-        return cast(*Declaration) procedure.parent, procedure;
+        return cast(*Declaration) procedure.parent, procedure, matched;
     }
 
-    return procedure_decls[best], procedure;
+    return procedure_decls[best], procedure, matched;
 }
 
 inside_comment :: (location: Node.Location) -> bool {

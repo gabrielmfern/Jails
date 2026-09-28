@@ -577,8 +577,8 @@ send_completions_decls :: (request: LSP_Request_Message_Completion, decls: []*De
             case;
                 item.kind = xx LSP_Completion_Item.Kind.Variable;
                 if !decl.parent && decl.type_inst {
-                    type, _, _, depth := get_node_type(decl);
-                    item.labelDetails.description = type_name(type, depth);
+                    type, _, bindings, depth := get_node_type(decl);
+                    item.labelDetails.description = type_name(type, depth, bindings);
                 } else {
                     item.labelDetails.description = ast_print_to_string(preview_node);
                 }
