@@ -1128,12 +1128,16 @@ select_first_decl :: (decls: []*Declaration, level: int) -> *Declaration {
     return decls[0];
 }
 
+resolving_decls: [..]*Declaration;
+
 get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false, return_index := 0) -> *Node, pointer: *Unary_Operation = null {
     current_node: *Node = root;
     result: *Node;
     pointer: *Unary_Operation;
     derefs := 0;
     pending_return_index := return_index;
+    resolving_count := resolving_decls.count;
+    defer resolving_decls.count = resolving_count;
 
     level: int;
     while true {
@@ -1217,6 +1221,9 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
         if current_node.kind == .DECLARATION {
             decl := cast(*Declaration) current_node;
+
+            if array_find(resolving_decls, decl) break;
+            array_add(*resolving_decls, decl);
 
             if decl.type_inst {
                 current_node = decl.type_inst;
@@ -1344,6 +1351,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
     if !result return null;
 
+    resolving_decls.count = resolving_count;
     for 1..derefs {
         if !pointer break;
         _, pointer = get_node_type(pointer.expression);
