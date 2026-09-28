@@ -70,7 +70,7 @@ rename_targets :: (file: *Program_File, cursor_node: *Node) -> old_name: string,
 renameable :: (targets: []*Declaration, old_name: string) -> bool {
     for target: targets {
         // Builtin "virtual" declarations (array count, ...) have no real source location.
-        if target.location.file.count == 0 return false;
+        if target.location.file.count == 0 || target.location.file == BUILTINS_PATH return false;
 
         target_file := get_file(target.location.file);
         if !target_file continue;

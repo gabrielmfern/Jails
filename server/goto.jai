@@ -449,7 +449,7 @@ handle_goto :: (request: LSP_Request_Message_Definition) {
     }
 
     locations: [..]LSP_Location;
-    for decls if it.location.file.count > 0 array_add(*locations, node_location_to_lsp_location(it.location));
+    for decls if it.location.file != BUILTINS_PATH array_add(*locations, node_location_to_lsp_location(it.location));
 
     lsp_respond(request.id, locations);
 }

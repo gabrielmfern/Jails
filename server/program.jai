@@ -30,6 +30,8 @@ Linked_File :: struct {
     file: *Program_File;
 }
 
+BUILTINS_PATH :: "<builtins>";
+
 BUILTINS :: #string JAI
 size_of :: (T: Type) -> s64 #intrinsic;
 type_info :: (T: Type) -> *Type_Info #intrinsic;
@@ -57,24 +59,6 @@ void_star_node := Identifier.{
 
 unknown_identifier_node := Identifier.{
     name = "---",
-};
-
-type_info_struct_identifier := Identifier.{
-    name = "Type_Info_Struct",
-};
-
-type_info_enum_identifier := Identifier.{
-    name = "Type_Info_Enum",
-};
-
-type_info_struct_pointer := Unary_Operation.{
-    operation = .POINTER,
-    expression = xx *type_info_struct_identifier,
-};
-
-type_info_enum_pointer := Unary_Operation.{
-    operation = .POINTER,
-    expression = xx *type_info_enum_identifier,
 };
 
 array_count_declaration := Declaration.{
@@ -351,7 +335,7 @@ analyze_files :: () {
 
     preload_file: *Program_File;
     runtime_support_file: *Program_File;
-    builtins_file := get_file("");
+    builtins_file := get_file(BUILTINS_PATH);
 
     for file: server.files {
         if !runtime_support_file && contains(file.path, "Runtime_Support.jai") {
@@ -1311,18 +1295,14 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
         if current_node.kind == .PROCEDURE_CALL {
             proc_call := cast(*Procedure_Call) current_node;
             proc_decl := get_procedure_call_decl(proc_call);
-            if proc_decl && proc_decl.location.file.count == 0 && proc_decl.name == "type_info" && proc_call.arguments.count == 1 {
-                arg_type, arg_pointer := get_node_type(proc_call.arguments[0]);
-                if arg_type && !arg_pointer {
-                    if arg_type.kind == .STRUCT || arg_type.kind == .UNION {
-                        current_node = *type_info_struct_pointer;
-                        continue;
-                    }
-
-                    if arg_type.kind == .ENUM {
-                        current_node = *type_info_enum_pointer;
-                        continue;
-                    }
+            if proc_decl && proc_decl.location.file == BUILTINS_PATH && proc_decl.name == "type_info" && proc_call.arguments.count == 1 {
+                type_info_decl := get_type_info_subtype(proc_call.arguments[0]);
+                if type_info_decl {
+                    type_info_pointer := New(Unary_Operation,, temp);
+                    type_info_pointer.operation = .POINTER;
+                    type_info_pointer.expression = type_info_decl;
+                    current_node = type_info_pointer;
+                    continue;
                 }
             }
 
@@ -1435,8 +1415,50 @@ get_block_of :: (node: *Node) -> *Block {
     return null;
 }
 
+get_type_info_subtype :: (type_expression: *Node) -> *Declaration {
+    type, pointer := get_node_type(type_expression, stop_at_procedure = type_expression.kind != .PROCEDURE_CALL);
+    if !type return null;
+
+    name: string;
+    if pointer {
+        name = "Type_Info_Pointer";
+    } else if type.kind == {
+        case .STRUCT; #through;
+        case .UNION;      name = "Type_Info_Struct";
+        case .ENUM;       name = "Type_Info_Enum";
+        case .ARRAY_TYPE; name = "Type_Info_Array";
+        case .PROCEDURE;  name = "Type_Info_Procedure";
+        case .IDENTIFIER;
+            if (cast(*Identifier) type).name == {
+                case "int"; #through;
+                case "s8"; #through;
+                case "s16"; #through;
+                case "s32"; #through;
+                case "s64"; #through;
+                case "u8"; #through;
+                case "u16"; #through;
+                case "u32"; #through;
+                case "u64";     name = "Type_Info_Integer";
+                case "float"; #through;
+                case "float32"; #through;
+                case "float64"; name = "Type_Info_Float";
+                case "string";  name = "Type_Info_String";
+            }
+    }
+
+    if !name return null;
+
+    preload := search_for_file("modules/Preload.jai");
+    if !preload return null;
+
+    ok, decl := table_find(*preload.declarations, name);
+    if !ok return null;
+
+    return decl;
+}
+
 // This depends on Preload having this type. We need to keep this in sync with the compiler.
-get_internal_array_struct :: (resizable: bool) -> *Struct {
+get_internal_array_struct ::(resizable: bool) -> *Struct {
     preload := search_for_file("modules/Preload.jai");
     if !preload {
         return null;
