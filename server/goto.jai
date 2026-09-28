@@ -38,7 +38,7 @@ get_expected_type :: (node: *Node) -> *Node {
     // For enum_flags with OR/AND operations in .PROCEDURE_CALL arguments, traverse up to find the actual context
     while parent_node && parent_node.kind == .BINARY_OPERATION {
         binary_op := cast(*Binary_Operation) parent_node;
-        if binary_op.operation == .PIPE || binary_op.operation == .BITWISE_AND {
+        if binary_op.operation == .PIPE || binary_op.operation == .BITWISE_AND || binary_op.operation == .ASSIGN {
             parent_node = binary_op.parent;
         } else {
             break;
@@ -58,44 +58,20 @@ get_expected_type :: (node: *Node) -> *Node {
         // - SDL_CreateGPUDevice(.SPIRV | .MSL | .DXIL, ...)
         proc_call := cast(*Procedure_Call) parent_node;
 
-        if proc_call.procedure && proc_call.procedure.kind == .IDENTIFIER {
-            proc_ident := cast(*Identifier) proc_call.procedure;
-
-            // Find which argument contains our enum literal (might be nested in OR or AND operations if it's an enum_flag)
-            arg_index := -1;
-            for arg, index: proc_call.arguments {
-                // Check if our node is somewhere within this argument
-                if is_parent_of(arg, node) {
-                    arg_index = index;
-                    break;
-                }
+        // Find which argument contains our enum literal (might be nested in OR or AND operations if it's an enum_flag)
+        arg_index := -1;
+        for arg, index: proc_call.arguments {
+            // Check if our node is somewhere within this argument
+            if is_parent_of(arg, node) {
+                arg_index = index;
+                break;
             }
+        }
 
-            if arg_index >= 0 {
-                // Get the procedure declaration
-                proc_decls := get_identifier_decls(proc_ident);
-
-                if proc_decls.count > 0 {
-                    proc_decl := proc_decls[0];
-
-                    if proc_decl.expression && proc_decl.expression.kind == .PROCEDURE {
-                        procedure := cast(*Procedure) proc_decl.expression;
-
-                        // Get the type of the corresponding parameter
-                        if arg_index < procedure.arguments.count {
-                            param := procedure.arguments[arg_index];
-                            unwrapped := unwrap_polymorphic_constant(param);
-
-                            if unwrapped && unwrapped.kind == .DECLARATION {
-                                param_decl := cast(*Declaration) unwrapped;
-                                if param_decl.type_inst {
-                                    expected_type = get_node_type(param_decl.type_inst);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        _, procedure := get_procedure_call_decl(proc_call);
+        if arg_index >= 0 && procedure {
+            param, param_type := get_argument_parameter(procedure, proc_call, arg_index);
+            if param expected_type = get_node_type(param_type);
         }
 
     } else if parent_node.kind == .DECLARATION {
@@ -298,36 +274,17 @@ resolve_named_argument :: (ident: *Identifier) -> *Declaration {
         return null;
     }
 
-    // We need to resolve the calle procedure.
-    decls := get_identifier_decls(cast(*Identifier) procedure_call.procedure);
-    if decls.count == 0 {
+    _, procedure := get_procedure_call_decl(procedure_call);
+    if !procedure {
         return null;
     }
 
-    procedure_decl := decls[0]; // TODO: here we need to resolve procedure overloading in the future.
-    if !procedure_decl.expression || procedure_decl.expression.kind != .PROCEDURE {
+    found, arg_index := array_find(procedure_call.arguments, binary_op);
+    if !found {
         return null;
     }
 
-    procedure := cast(*Procedure) procedure_decl.expression;
-
-    for arg: procedure.arguments {
-        unwrapped_arg := unwrap_polymorphic_constant(arg);
-
-        // It should always be decl??
-        if unwrapped_arg.kind != .DECLARATION {
-            log("arg.kind: %", arg.kind);
-            continue;
-        }
-
-        arg_decl := cast(*Declaration) unwrapped_arg;
-
-        if arg_decl.name == ident.name {
-            return arg_decl;
-        }
-    }
-
-    return null;
+    return get_argument_parameter(procedure, procedure_call, arg_index);
 }
 
 resolve_struct_literal_member :: (ident: *Identifier) -> *Declaration {
@@ -408,35 +365,7 @@ resolve_procedure_call_decl :: (ident: *Identifier) -> *Declaration {
         return null;
     }
 
-    decls := get_identifier_decls(ident);
-    if decls.count == 0 {
-        return null;
-    }
-
-    procedures: [..]*Procedure;
-    procedure_decls: [..]*Declaration;
-    for proc_decl: decls {
-        type := get_node_type(proc_decl, stop_at_procedure=true);
-        if !type || type.kind != .PROCEDURE {
-            continue;
-        }
-
-        array_add(*procedures, cast(*Procedure) type);
-        array_add(*procedure_decls, proc_decl);
-    }
-
-    if procedures.count == 0 {
-        return null;
-    }
-
-    best_override_index := get_best_overload_for_procedure_call(procedures, proc_call);
-
-    best_procedure := procedures[best_override_index];
-    if best_procedure.parent && best_procedure.parent.kind == .DECLARATION {
-        return cast(*Declaration) best_procedure.parent;
-    }
-
-    return procedure_decls[best_override_index];
+    return get_procedure_call_decl(proc_call);
 }
 
 resolve_enum_member :: (ident: *Identifier) -> *Declaration {

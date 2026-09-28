@@ -85,7 +85,7 @@ handle_signature_help :: (request: LSP_Request_Message_Signature_Help) {
     }
 
     signature_help: LSP_Signature_Help;
-    signature_help.activeSignature = cast(u32) get_best_overload_for_procedure_call(procedures, proc_call);
+    signature_help.activeSignature = cast(u32) get_best_overload_for_procedure_call(procedures, proc_call, prefer_complete=false);
     signature_help.signatures = signatures;
 
     lsp_respond(request.id, signature_help);

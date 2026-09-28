@@ -1278,7 +1278,12 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
         if current_node.kind == .PROCEDURE_CALL {
             proc_call := cast(*Procedure_Call) current_node;
-            current_node = proc_call.procedure;
+            proc_decl := get_procedure_call_decl(proc_call);
+            if proc_decl {
+                current_node = proc_decl;
+            } else {
+                current_node = proc_call.procedure;
+            }
             continue;
         }
 
@@ -1688,7 +1693,7 @@ get_path_type :: (path: []*Node, return_index := 0) -> *Node, pointer: *Unary_Op
                     }
 
                     select_decl := ifx node.kind == .PROCEDURE_CALL then select_first_decl else select_first_non_procedure_decl;
-                    current_type, pointer = get_node_type(identifier, solve_array, select_decl, return_index=node_return_index);
+                    current_type, pointer = get_node_type(ifx node.kind == .PROCEDURE_CALL then node else identifier, solve_array, select_decl, return_index=node_return_index);
                     if !current_type {
                         break;
                     }
@@ -1827,65 +1832,156 @@ get_base_type_from_ident_or_literal :: (node: *Node) -> Base_Type {
     return .UNKNOWN;
 }
 
-is_same_type :: (a: *Node, b: *Node) -> bool {
-    if !a || !b {
-        return false;
+type_match :: (arg: *Node, param: *Node) -> int {
+    Type_Class :: enum { UNKNOWN; ARRAY; USER; STRING; INT; FLOAT; BOOL; }
+
+    class_of :: (type: *Node) -> Type_Class, Base_Type {
+        if !type return .UNKNOWN, .UNKNOWN;
+        if type.kind == .ARRAY_TYPE return .ARRAY, .UNKNOWN;
+        if type.kind == .LITERAL && (cast(*Literal) type).value_type == .ARRAY return .ARRAY, .UNKNOWN;
+        if type.kind == .STRUCT || type.kind == .ENUM || type.kind == .UNION return .USER, .UNKNOWN;
+
+        base := get_base_type_from_ident_or_literal(type);
+        if base == .STRING return .STRING, base;
+        if base == .BOOL return .BOOL, base;
+        if base >= .INT && base <= .U8 return .INT, base;
+        if base >= .FLOAT && base <= .FLOAT64 return .FLOAT, base;
+        return .UNKNOWN, base;
     }
 
-    // complex types (user defined) as Entity, Monster, Player...
-    if a.kind != .IDENTIFIER && a.kind != .LITERAL || b.kind != .IDENTIFIER && b.kind != .LITERAL  {
-        return a == b;
+    array_element :: (type: *Node) -> *Node {
+        if type.kind == .ARRAY_TYPE return (cast(*Array_Type) type).element_type;
+        return (cast(*Literal) type).array_literal_info.element_type;
     }
 
-    // likely base type as string, int...
-    a_base_type := get_base_type_from_ident_or_literal(a);
-    b_base_type := get_base_type_from_ident_or_literal(b);
+    if !arg || !param return 0;
 
-    if a_base_type == .UNKNOWN || b_base_type == .UNKNOWN {
-        return false;
+    if arg.kind == .IDENTIFIER {
+        decls := get_identifier_decls(cast(*Identifier) arg);
+        if decls.count > 0 && decls[0].expression && decls[0].expression.kind == .PROCEDURE return 0;
     }
 
-    return a_base_type == b_base_type;
+    arg_type, arg_pointer := get_node_type(arg);
+    param_type, param_pointer := get_node_type(param, stop_at_procedure=true);
+    arg_class, arg_base := class_of(arg_type);
+    param_class, param_base := class_of(param_type);
+    if arg_class == .UNKNOWN || param_class == .UNKNOWN return 0;
+
+    if (arg_pointer == null) != (param_pointer == null) return -1;
+
+    if arg_class == .ARRAY && param_class == .ARRAY {
+        match := type_match(array_element(arg_type), array_element(param_type));
+        return ifx match == 0 then 1 else match;
+    }
+
+    if arg_class == .USER && param_class == .USER return ifx arg_type == param_type then 2 else -1;
+    if arg_class == param_class return ifx arg_base == param_base then 2 else 1;
+    if arg_class == .INT && param_class == .FLOAT return 1;
+    return -1;
 }
 
-// @TODO: vargs, polymorphic types
-get_best_overload_for_procedure_call :: (procedures: []*Procedure, call: *Procedure_Call) -> int {
+is_varargs :: (param: *Declaration) -> bool {
+    return param.type_inst && param.type_inst.kind == .UNARY_OPERATION && (cast(*Unary_Operation) param.type_inst).operation == .ELLIPSIS;
+}
+
+get_procedure_parameters :: (procedure: *Procedure) -> []*Declaration {
+    params: [..]*Declaration;
+    for procedure.arguments {
+        node := unwrap_polymorphic_constant(it);
+        if node.kind == .USING node = (cast(*Using) node).expression;
+        if node && node.kind == .DECLARATION array_add(*params, cast(*Declaration) node);
+    }
+
+    return params;
+}
+
+get_argument_parameter :: (procedure: *Procedure, call: *Procedure_Call, arg_index: int) -> param: *Declaration, param_type: *Node, value: *Node {
+    value := call.arguments[arg_index];
+    params := get_procedure_parameters(procedure);
+
+    param: *Declaration;
+    binary_op := cast(*Binary_Operation) value;
+    if value && value.kind == .BINARY_OPERATION && binary_op.operation == .ASSIGN && binary_op.left && binary_op.left.kind == .IDENTIFIER {
+        value = binary_op.right;
+        for params if it.name == (cast(*Identifier) binary_op.left).name param = it;
+    } else if arg_index < params.count {
+        param = params[arg_index];
+    } else if params.count > 0 && is_varargs(params[params.count-1]) {
+        param = params[params.count-1];
+    }
+
+    if !param return null, null, value;
+    if is_varargs(param) return param, (cast(*Unary_Operation) param.type_inst).expression, value;
+    if param.type_inst return param, param.type_inst, value;
+    return param, param, value;
+}
+
+get_best_overload_for_procedure_call :: (procedures: []*Procedure, call: *Procedure_Call, prefer_complete := true) -> int {
     if procedures.count < 2 {
         return 0;
     }
 
-    current_best := 0;
-    current_best_matched_args: u16 = 0;
+    best := 0;
+    best_complete := false;
+    best_score := -1;
 
     for procedure: procedures {
-        matched_args: u16;
+        score := 0;
+        filled: [..]*Declaration;
 
-        if call.arguments.count > procedure.arguments.count {
-            continue;
+        for call.arguments {
+            param, param_type, value := get_argument_parameter(procedure, call, it_index);
+            if !param continue procedure;
+            array_add(*filled, param);
+
+            match := type_match(value, param_type);
+            if match < 0 continue procedure;
+            score += match;
         }
 
-        for call_arg, call_arg_index: call.arguments {
-            arg := procedure.arguments[call_arg_index];
-
-            call_arg_type := get_node_type(call_arg);
-            arg_type := get_node_type(arg);
-
-            // log("Arg [%]: caller (% - %), calle (% - %)", arg_index, to_string(call_arg_type), call_arg_type.kind, to_string(arg_type), arg_type.kind);
-
-            if !is_same_type(arg_type, call_arg_type) {
-                break call_arg;
-            }
-
-            matched_args += 1;
+        complete := true;
+        if prefer_complete for get_procedure_parameters(procedure) {
+            if !it.expression && !is_varargs(it) && !array_find(filled, it) complete = false;
         }
 
-        if matched_args > current_best_matched_args {
-            current_best = it_index;
-            current_best_matched_args = matched_args;
+        if (complete && !best_complete) || (complete == best_complete && score > best_score) {
+            best = it_index;
+            best_complete = complete;
+            best_score = score;
         }
     }
 
-    return current_best;
+    return best;
+}
+
+get_procedure_call_decl :: (call: *Procedure_Call) -> *Declaration, *Procedure {
+    if !call.procedure || call.procedure.kind != .IDENTIFIER {
+        return null, null;
+    }
+
+    procedures: [..]*Procedure;
+    procedure_decls: [..]*Declaration;
+    for get_identifier_decls(cast(*Identifier) call.procedure) {
+        type := get_node_type(it, stop_at_procedure=true);
+        if !type || type.kind != .PROCEDURE {
+            continue;
+        }
+
+        array_add(*procedures, cast(*Procedure) type);
+        array_add(*procedure_decls, it);
+    }
+
+    if procedures.count == 0 {
+        return null, null;
+    }
+
+    best := get_best_overload_for_procedure_call(procedures, call);
+    procedure := procedures[best];
+    if procedure.parent && procedure.parent.kind == .DECLARATION {
+        return cast(*Declaration) procedure.parent, procedure;
+    }
+
+    return procedure_decls[best], procedure;
 }
 
 inside_comment :: (location: Node.Location) -> bool {
