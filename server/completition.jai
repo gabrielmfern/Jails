@@ -358,7 +358,7 @@ handle_enum_literal_completions :: (request: LSP_Request_Message_Completion, cur
     return handle_completitions_for_node(request, enum_type);
 }
 
-handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node: *Node, pointer: *Node = null) -> bool {
+handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node: *Node, pointer: *Unary_Operation = null) -> bool {
     decls: [..]*Declaration;
     defer array_free(decls);
 
@@ -447,9 +447,24 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
     //     return false;
     // }
 
+    pointee_name :: (pointer: *Unary_Operation) -> string {
+        type, inner := get_node_type(pointer.expression);
+        if inner return tprint("*%", pointee_name(inner));
+
+        if type && type.parent && type.parent.kind == .DECLARATION && (cast(*Declaration) type.parent).expression == type {
+            return (cast(*Declaration) type.parent).name;
+        }
+
+        builder: String_Builder;
+        ast_print(*builder, type);
+        return builder_to_string(*builder,, temp);
+    }
+
     deref_decl: Declaration;
+    deref_type: Identifier;
     if pointer {
-        deref_decl = .{name = "*", type_inst = (cast(*Unary_Operation) pointer).expression};
+        deref_type.name = pointee_name(pointer);
+        deref_decl = .{name = "*", type_inst = *deref_type};
         array_add(*decls, *deref_decl);
     }
 

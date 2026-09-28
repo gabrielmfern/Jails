@@ -1128,10 +1128,11 @@ select_first_decl :: (decls: []*Declaration, level: int) -> *Declaration {
     return decls[0];
 }
 
-get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false, derefs := 0, return_index := 0) -> *Node, pointer: *Node = null {
+get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false, return_index := 0) -> *Node, pointer: *Unary_Operation = null {
     current_node: *Node = root;
-    pointer: *Node;
-    pending_derefs := derefs;
+    result: *Node;
+    pointer: *Unary_Operation;
+    derefs := 0;
     pending_return_index := return_index;
 
     level: int;
@@ -1151,7 +1152,8 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
             if ident_decls.count == 0 {
                 // log("Does not find anything for '%'...", ident.name);
-                return current_node, pointer;
+                result = current_node;
+                break;
             }
 
             current_node = select_decl(ident_decls, level);
@@ -1160,7 +1162,8 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
         }
 
         if current_node.kind == .STRUCT || current_node.kind == .UNION || current_node.kind == .ENUM || current_node.kind == .DIRECTIVE_IMPORT {
-            return current_node, pointer;
+            result = current_node;
+            break;
         }
 
         if current_node.kind == .DIRECTIVE_CONTEXT {
@@ -1181,7 +1184,8 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                 current_node = array_type.element_type;
                 continue;
             } else {
-                return array_type, pointer;
+                result = array_type;
+                break;
             }
         }
 
@@ -1308,9 +1312,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
         if current_node.kind == .UNARY_OPERATION {
             unary_op := cast(*Unary_Operation) current_node;
             if unary_op.operation == .POINTER {
-                if pending_derefs > 0 {
-                    pending_derefs -= 1;
-                } else if !pointer {
+                if !pointer {
                     pointer = unary_op;
                 }
 
@@ -1323,7 +1325,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                     break;
                 }
 
-                pending_derefs += 1;
+                derefs += 1;
                 current_node = unary_op.expression;
                 continue;
             }
@@ -1340,7 +1342,14 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
         break;
     }
 
-    return null;
+    if !result return null;
+
+    for 1..derefs {
+        if !pointer break;
+        _, pointer = get_node_type(pointer.expression);
+    }
+
+    return result, pointer;
 }
 
 unwrap_polymorphic_constant :: (node: *Node) -> *Node {
@@ -1612,21 +1621,15 @@ get_dot_path :: (binary_op: *Binary_Operation, from: *Node) -> []*Node {
     return path;
 }
 
-get_path_type :: (path: []*Node, recursion_limit: s16 = 1024, return_index := 0) -> *Node, pointer: *Node = null {
+get_path_type :: (path: []*Node, return_index := 0) -> *Node, pointer: *Unary_Operation = null {
     current_type: *Node;
-    pointer: *Node;
+    pointer: *Unary_Operation;
     resolved_nodes: int;
-
-    if recursion_limit <= 0 {
-        // Enforce a limit on recursive type aliases and unresolved paths so malformed
-        // programs cannot exhaust the stack.
-        log_error("Recurisve search limit reached, quitting search");
-        return null;
-    }
+    derefs: int;
 
     for path_node: path {
         node := path_node;
-        derefs := 0;
+        derefs = 0;
         node_return_index := ifx it_index == path.count - 1 then return_index else 0;
         while node && node.kind == .UNARY_OPERATION && (cast(*Unary_Operation) node).operation == .POINTER_DEREFERENCE {
             derefs += 1;
@@ -1677,7 +1680,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024, return_index := 0)
                     }
 
                     select_decl := ifx node.kind == .PROCEDURE_CALL then select_first_decl else select_first_non_procedure_decl;
-                    current_type, pointer = get_node_type(identifier, solve_array, select_decl, derefs=derefs, return_index=node_return_index);
+                    current_type, pointer = get_node_type(identifier, solve_array, select_decl, return_index=node_return_index);
                     if !current_type {
                         break;
                     }
@@ -1692,7 +1695,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024, return_index := 0)
                         break;
                     }
 
-                    current_type, pointer = get_node_type(decl, solve_array, derefs=derefs, return_index=node_return_index);
+                    current_type, pointer = get_node_type(decl, solve_array, return_index=node_return_index);
                     resolved_nodes += 1;
                     continue;
                 }
@@ -1708,7 +1711,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024, return_index := 0)
                         break;
                     }
 
-                    current_type, pointer = get_node_type(decl, solve_array, derefs=derefs, return_index=node_return_index);
+                    current_type, pointer = get_node_type(decl, solve_array, return_index=node_return_index);
                     if !current_type {
                         break;
                     }
@@ -1724,7 +1727,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024, return_index := 0)
 
             case .CAST;
                 _cast := cast(*Cast) node;
-                current_type, pointer = get_node_type(_cast.cast_expression, true, derefs=derefs);
+                current_type, pointer = get_node_type(_cast.cast_expression, true);
                 if !current_type {
                     return null;
                 }
@@ -1735,13 +1738,14 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024, return_index := 0)
         }
     }
 
-    if current_type && current_type.kind == .IDENTIFIER && current_type.location.file.data != null {
-        return get_path_type(.[current_type], recursion_limit - 1);
-    }
-
     // We are unable to resolve whole path so the final type would be invalid.
     if path.count > resolved_nodes  {
         return null;
+    }
+
+    for 1..derefs {
+        if !pointer break;
+        _, pointer = get_node_type(pointer.expression);
     }
 
     return current_type, pointer;
