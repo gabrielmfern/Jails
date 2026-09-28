@@ -1,4 +1,9 @@
-MAX_IMPORT_ACTIONS :: 5;
+NOT_IMPORTABLE_MODULES :: string.["Preload", "Runtime_Support", "Default_Metaprogram", "Minimal_Metaprogram"];
+
+Module_Declaration :: struct {
+    name: string;
+    module: int;
+}
 
 Module_Scan :: struct {
     declarations: [..]*Declaration;
@@ -22,10 +27,12 @@ is_visible_to_importers :: (node: *Node) -> bool {
     return true;
 }
 
-index_module :: (module: string, entry: string) {
-    pool: Pool;
-    set_allocators(*pool, context.default_allocator);
-    defer release(*pool);
+index_module :: (module: int, entry: string) {
+    ast_pool: Pool;
+    set_allocators(*ast_pool, context.default_allocator);
+    defer release(*ast_pool);
+
+    names := pool_alloc(*server.module_index_pool);
 
     files: [..]string;
     defer array_free(files);
@@ -33,7 +40,7 @@ index_module :: (module: string, entry: string) {
 
     file_index := 0;
     while file_index < files.count {
-        push_allocator(pool_alloc(*pool));
+        push_allocator(pool_alloc(*ast_pool));
 
         path := files[file_index];
         file_index += 1;
@@ -56,82 +63,77 @@ index_module :: (module: string, entry: string) {
 
         for decl: parser.user_data.declarations {
             if !decl.name || !is_visible_to_importers(decl) continue;
-
-            modules := table_find_pointer(*server.module_index, decl.name);
-            if !modules {
-                push_allocator(context.default_allocator);
-                empty: [..]string;
-                modules = table_add(*server.module_index, copy_string(decl.name), empty);
-            }
-
-            if modules.count && modules.*[modules.count-1] == module continue;
-
-            push_allocator(context.default_allocator);
-            array_add(modules, module);
+            array_add(*server.module_declarations, .{ name=copy_string(decl.name,, names), module=module });
         }
     }
 }
 
 build_module_index :: () {
     push_allocator(context.default_allocator);
+    start := seconds_since_init();
+
+    set_allocators(*server.module_index_pool, context.default_allocator);
+    server.module_declarations.allocator = context.default_allocator;
 
     folders: [..]string;
-    defer array_free(folders);
+    folders.allocator = temp;
+    for server.local_modules array_add(*folders, local_module_folder_path(it,, temp));
+    array_add(*folders, tprint("%/modules", server.args.jai_path));
 
-    for server.local_modules {
-        if is_absolute_path(it) array_add(*folders, normalize_path(it,, temp));
-        else array_add(*folders, normalize_path(join(server.project_root, it, separator="/",, temp),, temp));
-    }
-    array_add(*folders, normalize_path(tprint("%/modules", server.args.jai_path),, temp));
-
-    Module_Entry :: struct {
-        name: string;
-        entry: string;
-    }
-
-    entries: [..]Module_Entry;
-    defer array_free(entries);
-
+    names: [..]string;
+    names.allocator = temp;
     for folder: folders {
         if !file_exists(folder) continue;
 
-        visit_files(folder, false, *entries, (info: *File_Visit_Info, entries: *[..]Module_Entry) {
-            entry: Module_Entry;
-            if info.is_directory {
-                entry.name = info.short_name;
-                entry.entry = tprint("%/module.jai", info.full_name);
-                if !file_exists(entry.entry) return;
-            } else {
-                if !ends_with(info.short_name, ".jai") return;
-                entry.name = slice(info.short_name, 0, info.short_name.count - ".jai".count);
-                entry.entry = copy_string(info.full_name,, temp);
+        visit_files(folder, false, *names, (info: *File_Visit_Info, names: *[..]string) {
+            name := info.short_name;
+            if !info.is_directory {
+                if !ends_with(name, ".jai") return;
+                name.count -= ".jai".count;
             }
 
-            for entries.* if it.name == entry.name return;
-            entry.name = copy_string(entry.name,, temp);
-            array_add(entries, entry);
+            if array_find(NOT_IMPORTABLE_MODULES, name) return;
+            array_add_if_unique(names, copy_string(name,, temp));
         }, visit_directories=true);
     }
 
-    start := seconds_since_init();
-    for entries index_module(copy_string(it.name), it.entry);
-    log("Indexed % modules in % ms", entries.count, (seconds_since_init() - start) * 1000);
+    for names {
+        entry := get_module(it,, temp);
+        if !entry continue;
+
+        array_add(*server.module_names, copy_string(it,, pool_alloc(*server.module_index_pool)));
+        index_module(server.module_names.count-1, entry);
+    }
+
+    quick_sort(server.module_declarations, (a: Module_Declaration, b: Module_Declaration) -> int { return compare(a.name, b.name); });
+
+    log("Indexed % declarations from % modules in % ms", server.module_declarations.count, server.module_names.count, (seconds_since_init() - start) * 1000);
 }
 
-start_module_index_thread :: () {
-    thread_init(*server.module_index_thread, (thread: *Thread) -> s64 {
-        context.logger = lsp_log;
-        build_module_index();
-        return 0;
+get_modules_declaring :: (name: string) -> [..]string {
+    declarations := server.module_declarations;
+
+    low, high := 0, declarations.count;
+    while low < high {
+        middle := (low + high) / 2;
+        if compare(declarations[middle].name, name) < 0 low = middle + 1;
+        else high = middle;
+    }
+
+    modules: [..]string;
+    while low < declarations.count && declarations[low].name == name {
+        array_add_if_unique(*modules, server.module_names[declarations[low].module]);
+        low += 1;
+    }
+
+    quick_sort(modules, (a: string, b: string) -> int {
+        if a == b return 0;
+        if a == "Basic" return -1;
+        if b == "Basic" return 1;
+        return compare(a, b);
     });
-    thread_start(*server.module_index_thread);
-}
 
-compare_import_modules :: (a: string, b: string) -> int {
-    if a == b return 0;
-    if a == "Basic" return -1;
-    if b == "Basic" return 1;
-    return compare(a, b);
+    return modules;
 }
 
 handle_code_action :: (request: LSP_Request_Message_Code_Action) {
@@ -143,33 +145,8 @@ handle_code_action :: (request: LSP_Request_Message_Code_Action) {
         return;
     }
 
-    thread_is_done(*server.module_index_thread, -1);
-
-    insert_line := 0;
-    for node: file.nodes {
-        if node.kind != .DIRECTIVE_IMPORT continue;
-
-        top := node;
-        while top.parent && (top.parent.kind == .DECLARATION || top.parent.kind == .USING || top.parent.kind == .DIRECTIVE_SCOPE) {
-            top = top.parent;
-        }
-
-        if top.parent != *file.global_block continue;
-        insert_line = max(insert_line, node.location.l1 + 1);
-    }
-
-    Workspace_Edit :: struct {
-        documentChanges: []LSP_Text_Document_Edit;
-    }
-
-    Code_Action :: struct {
-        title: string;
-        kind := "quickfix";
-        diagnostics: []LSP_Diagnostic;
-        edit: Workspace_Edit;
-    }
-
-    actions: [..]Code_Action;
+    actions: [..]LSP_Code_Action;
+    insert_line := -1;
 
     UNDECLARED :: "Undeclared identifier '";
     for diagnostic: request.params._context.diagnostics {
@@ -181,16 +158,24 @@ handle_code_action :: (request: LSP_Request_Message_Code_Action) {
         if name_end < 0 continue;
         name.count = name_end;
 
-        modules := table_find_pointer(*server.module_index, name);
-        if !modules continue;
+        if !server.module_names.count build_module_index();
 
-        candidates := array_copy(modules.*);
-        quick_sort(candidates, compare_import_modules);
+        if insert_line < 0 {
+            insert_line = 0;
+            for node: file.nodes {
+                if node.kind != .DIRECTIVE_IMPORT continue;
 
-        offered := 0;
-        for module: candidates {
-            if offered == MAX_IMPORT_ACTIONS break;
+                top := node;
+                while top.parent && (top.parent.kind == .DECLARATION || top.parent.kind == .USING || top.parent.kind == .DIRECTIVE_SCOPE) {
+                    top = top.parent;
+                }
 
+                if top.parent != *file.global_block continue;
+                insert_line = max(insert_line, node.location.l1 + 1);
+            }
+        }
+
+        for module: get_modules_declaring(name) {
             imported := false;
             for file.imports if it.module == module imported = true;
             if imported continue;
@@ -207,10 +192,10 @@ handle_code_action :: (request: LSP_Request_Message_Code_Action) {
 
             action := array_add(*actions);
             action.title = tprint("Add #import \"%\";", module);
+            action.kind = "quickfix";
             action.diagnostics = NewArray(1, LSP_Diagnostic);
             action.diagnostics[0] = diagnostic;
             action.edit.documentChanges = document_changes;
-            offered += 1;
         }
     }
 

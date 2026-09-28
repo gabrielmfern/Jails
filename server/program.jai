@@ -451,41 +451,31 @@ node_visit :: (node: *Node, data: Node_Visit_Data) {
     }
 }
 
-get_module_import_path :: (_import: *Directive_Import, current_path: string) -> string {
+local_module_folder_path :: (folder: string) -> string {
+    if is_absolute_path(folder) return normalize_path(folder);
+    return normalize_path(join(server.project_root, folder, separator="/",, temp));
+}
 
-    get_module_entry :: (module: string) -> string {
-        uri := join(module, "/module.jai");
-        if file_exists(uri) return uri;
+get_module_entry :: (module: string) -> string {
+    uri := join(module, "/module.jai");
+    if file_exists(uri) return uri;
 
-        uri = join(module, ".jai");
-        if file_exists(uri) return uri;
+    uri = join(module, ".jai");
+    if file_exists(uri) return uri;
 
-        return "";
-    }
+    return "";
+}
 
-    get_module :: (module_name: string) -> string {
-        for local_modules_folder: server.local_modules {
-            absolute_path: string;
-            if is_absolute_path(local_modules_folder) {
-                absolute_path = local_modules_folder;
-            } else {
-                absolute_path = join(server.project_root, local_modules_folder, separator="/");
-            }
-
-            absolute_path = normalize_path(absolute_path);
-
-            entry := get_module_entry(join(absolute_path, module_name, separator="/"));
-            if entry.count > 0 return entry;
-        }
-
-        jai_modules := join(server.args.jai_path, "/modules");
-
-        entry := get_module_entry(join(jai_modules, module_name, separator="/"));
+get_module :: (module_name: string) -> string {
+    for server.local_modules {
+        entry := get_module_entry(join(local_module_folder_path(it), module_name, separator="/"));
         if entry.count > 0 return entry;
-
-        return "";
     }
 
+    return get_module_entry(join(server.args.jai_path, "modules", module_name, separator="/"));
+}
+
+get_module_import_path :: (_import: *Directive_Import, current_path: string) -> string {
     path: string;
 
     if _import.import_kind == {

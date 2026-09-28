@@ -363,9 +363,7 @@ LSP_Delete_File :: struct {
 /* Workspace Edit */
 
 LSP_Workspace_Edit :: struct {
-    changes: *JSON_Object; // 🛑 optional { [uri: DocumentUri]: []TextEdit; };
-    documentChandes: *JSON_Object; // 🛑 optional []TextDocument | [](TextDocumentEdit | CreateFile | RenameFile | DeleteFile)
-    // changeAnnotations: *Hash_Table(string, []LSP_Change_Annotation); // 🛑
+    documentChanges: []LSP_Text_Document_Edit;
 }
 
 LSP_Workspace_Edit_Client_Capabilites :: struct {
@@ -580,6 +578,13 @@ LSP_Request_Message_Code_Action :: struct {
             diagnostics: []LSP_Diagnostic;
         } @JsonName(context)
     }
+}
+
+LSP_Code_Action :: struct {
+    title: string;
+    kind: string;
+    diagnostics: []LSP_Diagnostic;
+    edit: LSP_Workspace_Edit;
 }
 
 LSP_Inlay_Hint :: struct {

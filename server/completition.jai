@@ -184,8 +184,7 @@ handle_completitions_import :: (request: LSP_Request_Message_Completion, directi
 
     // Local modules
     for local_module: server.local_modules {
-        local_modules_dir := tprint("%/%", server.project_root, local_module);
-        visit_files(local_modules_dir, false, *completions, visit_modules, true, true);
+        visit_files(local_module_folder_path(local_module,, temp), false, *completions, visit_modules, true, true);
     }
 
     lsp_respond(request.id, completions);

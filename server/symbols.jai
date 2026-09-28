@@ -44,9 +44,7 @@ handle_workspace_symbol :: (request: LSP_Request_Message_Workspace_Symbol) {
         if !server.user_options.use_symbols_from_local_modules {
             // Skip files from local modules (we only want workspace project files)
             for local_module_folder: server.local_modules {
-                full_local_module_folder_path := tprint("%/%", server.project_root, local_module_folder);
-
-                if begins_with(file.path, full_local_module_folder_path) {
+                if begins_with(file.path, local_module_folder_path(local_module_folder,, temp)) {
                     continue file;
                 }
             }

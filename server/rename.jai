@@ -237,9 +237,5 @@ handle_rename :: (request: LSP_Request_Message_Rename) {
         document_changes[it_index].edits = it.text_edits;
     }
 
-    Rename_Result :: struct {
-        documentChanges: []LSP_Text_Document_Edit;
-    }
-
-    lsp_respond(request.id, Rename_Result.{ documentChanges=document_changes });
+    lsp_respond(request.id, LSP_Workspace_Edit.{ documentChanges=document_changes });
 }

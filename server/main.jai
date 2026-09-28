@@ -42,8 +42,9 @@ Server :: struct {
     global_declarations_pool: Pool;
     global_declarations: Table(Global_Declarations_Key, []*Declaration, global_declarations_key_hash, global_declarations_key_compare);
 
-    module_index: Table(string, [..]string);
-    module_index_thread: Thread;
+    module_index_pool: Pool;
+    module_names: [..]string;
+    module_declarations: [..]Module_Declaration;
 
     memory_files_lock: Mutex;
     memory_files: Table(string, [..]u8); // @todo: This is probably dumb - store files as array of lines instead (is this good idea?) // @ToDo: Keep track of a modified flag per file
@@ -376,7 +377,6 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
             lsp_respond(body.id, to_send);
 
             request_diagnostics();
-            start_module_index_thread();
 
         case "textDocument/definition";
             success, body := json_parse_string(raw_request, LSP_Request_Message_Definition,, temp);
