@@ -354,6 +354,8 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
             {
                 parse_file(tprint("%/modules/Runtime_Support.jai", server.args.jai_path), true);
                 parse_file(tprint("%/modules/Preload.jai", server.args.jai_path), true);
+                create_memory_file("", BUILTINS);
+                parse_file("", true);
             }
 
 

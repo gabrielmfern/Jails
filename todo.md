@@ -33,7 +33,7 @@
 - [x] Implement basic procedure overload resolution
 - [x] Autocomplete deref on pointer (`entity.*`)
 - [x] Support for compound declaration (`x,y,z: float;`)
-- [ ] Autocomplete buildin procedures (`size_of`, `type_of` ...)
+- [x] Autocomplete buildin procedures (`size_of`, `type_of` ...)
 - [ ] Mason registry (nvim)
 - [ ] Implement "fake" methods completions for types that are taken as the first argument of some procedures
 - [ ] Improve Linux and nvim support

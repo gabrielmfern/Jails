@@ -474,38 +474,15 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
 }
 
 add_basic_keywords :: (completions: *[..]LSP_Completion_Item) {
-    array_add(completions, .{label="string", insertText="string", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="bool", insertText="bool", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="int", insertText="int", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="s64", insertText="s64", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="s32", insertText="s32", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="s16", insertText="s16", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="s8", insertText="s8", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="u8", insertText="u8", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="u16", insertText="u16", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="u32", insertText="u32", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="u64", insertText="u64", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="float", insertText="float", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="float32", insertText="float32", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="float64", insertText="float64", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="Any", insertText="Any", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
+    KEYWORDS :: string.[
+        "string", "bool", "int", "s8", "s16", "s32", "s64", "u8", "u16", "u32", "u64",
+        "float", "float32", "float64", "void", "Any", "Type", "Code",
+        "struct", "union", "enum", "enum_flags", "interface", "operator",
+        "if", "ifx", "then", "else", "case", "for", "while", "break", "continue", "remove", "return", "defer",
+        "using", "inline", "no_inline", "cast", "xx", "push_context", "context", "null", "true", "false",
+    ];
 
-    array_add(completions, .{label="struct", insertText="struct", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="enum", insertText="enum", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="enum_flags", insertText="enum_flags", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-
-    array_add(completions, .{label="return", insertText="return", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="break", insertText="break", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="case", insertText="case", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="remove", insertText="remove", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="continue", insertText="continue", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="if", insertText="if", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="else", insertText="else", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="for", insertText="for", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="then", insertText="then", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="using", insertText="using", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="context", insertText="context", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
-    array_add(completions, .{label="inline", insertText="inline", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
+    for KEYWORDS array_add(completions, .{label=it, insertText=it, kind=xx LSP_Completion_Item.Kind.Keyword});
 
     // array_add(completions, .{label="#if", insertText="#if", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});
     // array_add(completions, .{label="#ifx", insertText="#ifx", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});

@@ -54,11 +54,14 @@ handle_references :: (request: LSP_Request_Message_References) {
 
     if request.params._context.includeDeclaration {
         for decl: target_decls {
+            if decl.location.file.count == 0 continue;
             add_location(*locations, node_location_to_lsp_location(decl.location));
         }
     }
 
     for other_file: server.files {
+        if other_file.path.count == 0 continue;
+
         for node: other_file.nodes {
             if node.kind != .IDENTIFIER continue;
 
@@ -140,9 +143,8 @@ handle_implementation :: (request: LSP_Request_Message_Implementation) {
         return;
     }
 
-    locations := NewArray(decls.count, LSP_Location);
-
-    for decls locations[it_index] = node_location_to_lsp_location(it.location);
+    locations: [..]LSP_Location;
+    for decls if it.location.file.count > 0 array_add(*locations, node_location_to_lsp_location(it.location));
 
     lsp_respond(request.id, locations);
 }

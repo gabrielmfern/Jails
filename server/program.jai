@@ -30,6 +30,15 @@ Linked_File :: struct {
     file: *Program_File;
 }
 
+BUILTINS :: #string JAI
+size_of :: (T: Type) -> s64 #intrinsic;
+type_info :: (T: Type) -> *Type_Info #intrinsic;
+initializer_of :: (T: Type) #intrinsic;
+type_of :: (expression: $E) -> Type #intrinsic;
+is_constant :: (expression: $E) -> bool #intrinsic;
+code_of :: (expression: $E) -> Code #intrinsic;
+JAI
+
 resizable_array_identifier := Identifier.{
     name = "Resizable_Array",
 };
@@ -48,6 +57,24 @@ void_star_node := Identifier.{
 
 unknown_identifier_node := Identifier.{
     name = "---",
+};
+
+type_info_struct_identifier := Identifier.{
+    name = "Type_Info_Struct",
+};
+
+type_info_enum_identifier := Identifier.{
+    name = "Type_Info_Enum",
+};
+
+type_info_struct_pointer := Unary_Operation.{
+    operation = .POINTER,
+    expression = xx *type_info_struct_identifier,
+};
+
+type_info_enum_pointer := Unary_Operation.{
+    operation = .POINTER,
+    expression = xx *type_info_enum_identifier,
 };
 
 array_count_declaration := Declaration.{
@@ -324,6 +351,7 @@ analyze_files :: () {
 
     preload_file: *Program_File;
     runtime_support_file: *Program_File;
+    builtins_file := get_file("");
 
     for file: server.files {
         if !runtime_support_file && contains(file.path, "Runtime_Support.jai") {
@@ -344,6 +372,10 @@ analyze_files :: () {
 
         if file != runtime_support_file && runtime_support_file {
             array_add(*linked_files, .{ file=runtime_support_file, from_import=true });
+        }
+
+        if file != builtins_file && builtins_file {
+            array_add(*linked_files, .{ file=builtins_file, from_import=true });
         }
 
         file.linked_files = linked_files;
@@ -1279,6 +1311,21 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
         if current_node.kind == .PROCEDURE_CALL {
             proc_call := cast(*Procedure_Call) current_node;
             proc_decl := get_procedure_call_decl(proc_call);
+            if proc_decl && proc_decl.location.file.count == 0 && proc_decl.name == "type_info" && proc_call.arguments.count == 1 {
+                arg_type, arg_pointer := get_node_type(proc_call.arguments[0]);
+                if arg_type && !arg_pointer {
+                    if arg_type.kind == .STRUCT || arg_type.kind == .UNION {
+                        current_node = *type_info_struct_pointer;
+                        continue;
+                    }
+
+                    if arg_type.kind == .ENUM {
+                        current_node = *type_info_enum_pointer;
+                        continue;
+                    }
+                }
+            }
+
             if proc_decl {
                 current_node = proc_decl;
             } else {

@@ -448,8 +448,8 @@ handle_goto :: (request: LSP_Request_Message_Definition) {
         return;
     }
 
-    locations := NewArray(decls.count, LSP_Location);
-    for decls locations[it_index] = node_location_to_lsp_location(it.location);
+    locations: [..]LSP_Location;
+    for decls if it.location.file.count > 0 array_add(*locations, node_location_to_lsp_location(it.location));
 
     lsp_respond(request.id, locations);
 }
