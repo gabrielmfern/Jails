@@ -736,8 +736,9 @@ get_declarations_from_parent :: (decls: *[..]*Declaration, node: *Node, from_loc
         case .STRUCT;
             _struct := cast(*Struct) node;
 
-            for arg: _struct.polymorphic_arguments {
-                if arg.kind != .DECLARATION continue;
+            for _struct.polymorphic_arguments {
+                arg := unwrap_polymorphic_constant(it);
+                if !arg || arg.kind != .DECLARATION continue;
                 decl := cast(*Declaration) arg;
 
                 if name.count == 0 || decl.name == name array_add(decls, decl);
@@ -748,8 +749,9 @@ get_declarations_from_parent :: (decls: *[..]*Declaration, node: *Node, from_loc
         case .UNION;
             _union := cast(*Union) node;
 
-            for arg: _union.polymorphic_arguments {
-                if arg.kind != .DECLARATION continue;
+            for _union.polymorphic_arguments {
+                arg := unwrap_polymorphic_constant(it);
+                if !arg || arg.kind != .DECLARATION continue;
                 decl := cast(*Declaration) arg;
 
                 if name.count == 0 || decl.name == name array_add(decls, decl);
@@ -1215,7 +1217,10 @@ bind_polymorphic :: (out: *[..]Poly_Binding, param_type: *Node, arg: Argument_Ty
 
     if param_type.kind == .PROCEDURE_CALL && arg.type.kind == .STRUCT {
         params: [..]*Declaration;
-        for (cast(*Struct) arg.type).polymorphic_arguments if it.kind == .DECLARATION array_add(*params, cast(*Declaration) it);
+        for (cast(*Struct) arg.type).polymorphic_arguments {
+            param := unwrap_polymorphic_constant(it);
+            if param && param.kind == .DECLARATION array_add(*params, cast(*Declaration) param);
+        }
 
         for (cast(*Procedure_Call) param_type).arguments {
             index := get_argument_parameter(params, it, it_index);
@@ -1461,7 +1466,10 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
                 struct_params: [..]*Declaration;
                 if callee && callee.kind == .STRUCT {
-                    for (cast(*Struct) callee).polymorphic_arguments if it.kind == .DECLARATION array_add(*struct_params, cast(*Declaration) it);
+                    for (cast(*Struct) callee).polymorphic_arguments {
+                        param := unwrap_polymorphic_constant(it);
+                        if param && param.kind == .DECLARATION array_add(*struct_params, cast(*Declaration) param);
+                    }
                 }
 
                 if !struct_params.count {
@@ -1482,7 +1490,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
                 param := params[index];
                 key: *Node = param;
-                if param.parent && param.parent.kind == .POLYMORPHIC_CONSTANT key = param.parent;
+                if procedure && param.parent && param.parent.kind == .POLYMORPHIC_CONSTANT key = param.parent;
 
                 array_add(*call_bindings, .{key = key, value = value, bindings = bindings});
                 bind_polymorphic(*call_bindings, get_parameter_type(param), args[it_index]);
@@ -1980,8 +1988,9 @@ get_path_type :: (path: []*Node, return_index := 0, root_bindings: []Poly_Bindin
 
                     decl := get_block_member(_struct.block, identifier);
                     if !decl for _struct.polymorphic_arguments {
-                        if it.kind == .DECLARATION && (cast(*Declaration) it).name == identifier.name {
-                            decl = cast(*Declaration) it;
+                        param := unwrap_polymorphic_constant(it);
+                        if param && param.kind == .DECLARATION && (cast(*Declaration) param).name == identifier.name {
+                            decl = cast(*Declaration) param;
                             break;
                         }
                     }
