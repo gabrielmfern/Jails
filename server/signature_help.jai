@@ -84,8 +84,29 @@ handle_signature_help :: (request: LSP_Request_Message_Signature_Help) {
         array_add(*signatures, turn_procedure_into_signature_information(proc_decl, procedures[it_index], proc_call, cursor_location));
     }
 
+    typing_argument := false;
+    if proc_call.arguments.count > 0 {
+        last := proc_call.arguments[proc_call.arguments.count-1];
+        if last && (cursor_location.l0 > last.location.l1 || cursor_location.l0 == last.location.l1 && cursor_location.c0 > last.location.c1) {
+            range: LSP_Range;
+            range.start = .{line=xx last.location.l1, character=xx last.location.c1};
+            range.end = request.params.position;
+            typing_argument = contains(find_range_in_memory_file(file_path, range), ",");
+        }
+    }
+
+    candidates: [..]*Procedure;
+    for procedures {
+        if !typing_argument || get_argument_parameter(get_procedure_parameters(it), null, proc_call.arguments.count) >= 0 {
+            array_add(*candidates, it);
+        }
+    }
+    if candidates.count == 0 array_copy(*candidates, procedures);
+
+    _, active := array_find(procedures, candidates[get_best_overload_for_procedure_call(candidates, proc_call)]);
+
     signature_help: LSP_Signature_Help;
-    signature_help.activeSignature = cast(u32) get_best_overload_for_procedure_call(procedures, proc_call, prefer_complete=false);
+    signature_help.activeSignature = cast(u32) active;
     signature_help.signatures = signatures;
 
     lsp_respond(request.id, signature_help);

@@ -70,8 +70,9 @@ get_expected_type :: (node: *Node) -> *Node {
 
         _, procedure := get_procedure_call_decl(proc_call);
         if arg_index >= 0 && procedure {
-            param, param_type := get_argument_parameter(procedure, proc_call, arg_index);
-            if param expected_type = get_node_type(param_type);
+            params := get_procedure_parameters(procedure);
+            index := get_argument_parameter(params, proc_call.arguments[arg_index], arg_index);
+            if index >= 0 expected_type = get_node_type(get_parameter_type(params[index]));
         }
 
     } else if parent_node.kind == .DECLARATION {
@@ -268,23 +269,16 @@ resolve_named_argument :: (ident: *Identifier) -> *Declaration {
         return null;
     }
 
-    procedure_call := cast(*Procedure_Call) binary_op.parent;
-
-    if !procedure_call.procedure {
-        return null;
-    }
-
-    _, procedure := get_procedure_call_decl(procedure_call);
+    _, procedure := get_procedure_call_decl(cast(*Procedure_Call) binary_op.parent);
     if !procedure {
         return null;
     }
 
-    found, arg_index := array_find(procedure_call.arguments, binary_op);
-    if !found {
-        return null;
+    for get_procedure_parameters(procedure) {
+        if it.name == ident.name return it;
     }
 
-    return get_argument_parameter(procedure, procedure_call, arg_index);
+    return null;
 }
 
 resolve_struct_literal_member :: (ident: *Identifier) -> *Declaration {
