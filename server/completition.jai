@@ -447,9 +447,10 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
     //     return false;
     // }
 
-    pointee_name :: (pointer: *Unary_Operation) -> string {
+    pointee_name :: (pointer: *Unary_Operation, resolved: *Node) -> string {
         type, inner := get_node_type(pointer.expression);
-        if inner return tprint("*%", pointee_name(inner));
+        if inner return tprint("*%", pointee_name(inner, resolved));
+        if !type || type.kind == .IDENTIFIER && get_base_type_from_ident_or_literal(type) == .UNKNOWN type = resolved;
 
         if type && type.parent && type.parent.kind == .DECLARATION && (cast(*Declaration) type.parent).expression == type {
             return (cast(*Declaration) type.parent).name;
@@ -463,7 +464,7 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
     deref_decl: Declaration;
     deref_type: Identifier;
     if pointer {
-        deref_type.name = pointee_name(pointer);
+        deref_type.name = pointee_name(pointer, node);
         deref_decl = .{name = "*", type_inst = *deref_type};
         array_add(*decls, *deref_decl);
     }

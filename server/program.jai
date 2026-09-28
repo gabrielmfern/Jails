@@ -665,7 +665,7 @@ get_declarations_from_for :: (decls: *[..]*Declaration, node: *Node, from_loc: *
     saved_skip_node := skip_node;
     defer skip_node = saved_skip_node;
     skip_node = _for;
-    iterator_type := get_node_type(_for.iterator, false);
+    iterator_type, _, bindings := get_node_type(_for.iterator, false);
     if !iterator_type {
         return;
     }
@@ -688,6 +688,14 @@ get_declarations_from_for :: (decls: *[..]*Declaration, node: *Node, from_loc: *
             }
 
             element_type = literal.array_literal_info.element_type;
+    }
+
+    while element_type && element_type.kind == .IDENTIFIER {
+        ident := cast(*Identifier) element_type;
+        binding := find_binding(bindings, ident.name, get_identifier_decls(ident));
+        if !binding break;
+        element_type = binding.value;
+        bindings = binding.bindings;
     }
 
     if !element_type {
@@ -1144,10 +1152,71 @@ select_first_decl :: (decls: []*Declaration, level: int) -> *Declaration {
     return decls[0];
 }
 
+Poly_Binding :: struct {
+    name: string;
+    decl: *Declaration;
+    value: *Node;
+    bindings: []Poly_Binding;
+}
+
+find_binding :: (bindings: []Poly_Binding, name: string, decls: []*Declaration) -> *Poly_Binding {
+    for * bindings {
+        if decls.count == 0 && it.name == name return it;
+        if it.decl && array_find(decls, it.decl) return it;
+    }
+
+    return null;
+}
+
+bind_polymorphic :: (out: *[..]Poly_Binding, param_type: *Node, arg: *Node, arg_bindings: []Poly_Binding) {
+    if !param_type || !arg return;
+
+    if param_type.kind == .POLYMORPHIC_CONSTANT {
+        const := cast(*Polymorphic_Constant) param_type;
+        if const.expression && const.expression.kind == .IDENTIFIER {
+            array_add(out, .{name = (cast(*Identifier) const.expression).name, value = arg, bindings = arg_bindings});
+        }
+        return;
+    }
+
+    unary_op := cast(*Unary_Operation) param_type;
+    if param_type.kind == .UNARY_OPERATION && unary_op.operation == .POINTER {
+        _, pointer := get_node_type(arg, root_bindings = arg_bindings);
+        if pointer bind_polymorphic(out, unary_op.expression, pointer.expression, arg_bindings);
+        return;
+    }
+
+    if param_type.kind == .ARRAY_TYPE {
+        type, pointer, type_bindings := get_node_type(arg, root_bindings = arg_bindings);
+        if type && !pointer && type.kind == .ARRAY_TYPE {
+            bind_polymorphic(out, (cast(*Array_Type) param_type).element_type, (cast(*Array_Type) type).element_type, type_bindings);
+        }
+        return;
+    }
+
+    if param_type.kind == .PROCEDURE_CALL {
+        type, pointer, type_bindings := get_node_type(arg, root_bindings = arg_bindings);
+        if !type || pointer || type.kind != .STRUCT return;
+
+        params: [..]*Declaration;
+        for (cast(*Struct) type).polymorphic_arguments if it.kind == .DECLARATION array_add(*params, cast(*Declaration) it);
+
+        for (cast(*Procedure_Call) param_type).arguments {
+            index := get_argument_parameter(params, it, it_index);
+            if index < 0 continue;
+
+            _, value := get_named_argument(it);
+            binding := find_binding(type_bindings, "", .[params[index]]);
+            if binding bind_polymorphic(out, value, binding.value, binding.bindings);
+        }
+    }
+}
+
 resolving_decls: [..]*Declaration;
 
-get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false, return_index := 0) -> *Node, pointer: *Unary_Operation = null {
+get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false, return_index := 0, root_bindings: []Poly_Binding = .[]) -> *Node, pointer: *Unary_Operation = null, bindings: []Poly_Binding = .[] {
     current_node: *Node = root;
+    bindings := root_bindings;
     result: *Node;
     pointer: *Unary_Operation;
     derefs := 0;
@@ -1169,6 +1238,13 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
             }
 
             ident_decls := get_identifier_decls(ident);
+
+            binding := find_binding(bindings, ident.name, ident_decls);
+            if binding {
+                current_node = binding.value;
+                bindings = binding.bindings;
+                continue;
+            }
 
             if ident_decls.count == 0 {
                 // log("Does not find anything for '%'...", ident.name);
@@ -1238,6 +1314,13 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
         if current_node.kind == .DECLARATION {
             decl := cast(*Declaration) current_node;
 
+            binding := find_binding(bindings, "", .[decl]);
+            if binding {
+                current_node = binding.value;
+                bindings = binding.bindings;
+                continue;
+            }
+
             if array_find(resolving_decls, decl) break;
             array_add(*resolving_decls, decl);
 
@@ -1268,7 +1351,8 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
         if current_node.kind == .BINARY_OPERATION {
             bin_op := cast(*Binary_Operation)current_node;
-            path_type, path_pointer: *Node;
+            path_type: *Node;
+            path_pointer: *Unary_Operation;
 
             if bin_op.operation == {
                 case .IS_NOT_EQUAL;
@@ -1278,23 +1362,24 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                 case .ASSIGN;
                     if bin_op.left.kind == .BINARY_OPERATION {
                         path := get_dot_path(xx bin_op.left, null);
-                        path_type, path_pointer = get_path_type(path);
+                        path_type, path_pointer, bindings = get_path_type(path, root_bindings = bindings);
                     } else {
-                        path_type, path_pointer = get_path_type(.[bin_op.left]);
+                        path_type, path_pointer, bindings = get_path_type(.[bin_op.left], root_bindings = bindings);
                     }
                 case;
                     path := get_dot_path(bin_op, null);
-                    path_type, path_pointer = get_path_type(path, return_index=pending_return_index);
+                    path_type, path_pointer, bindings = get_path_type(path, return_index=pending_return_index, root_bindings = bindings);
                     pending_return_index = 0;
             }
 
-            current_node = ifx path_pointer then path_pointer else path_type;
+            if path_pointer && !pointer pointer = path_pointer;
+            current_node = path_type;
             continue;
         }
 
         if current_node.kind == .PROCEDURE_CALL {
             proc_call := cast(*Procedure_Call) current_node;
-            proc_decl := get_procedure_call_decl(proc_call);
+            proc_decl, procedure := get_procedure_call_decl(proc_call);
             if proc_decl && proc_decl.location.file == BUILTINS_PATH && proc_decl.name == "type_info" && proc_call.arguments.count == 1 {
                 type_info_decl := get_type_info_subtype(proc_call.arguments[0]);
                 if type_info_decl {
@@ -1306,11 +1391,33 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                 }
             }
 
-            if proc_decl {
+            params: [..]*Declaration;
+            if procedure {
+                array_add(*params, ..get_procedure_parameters(procedure));
                 current_node = proc_decl;
             } else {
                 current_node = proc_call.procedure;
+                callee := get_node_type(proc_call.procedure, root_bindings = bindings);
+                polymorphic_arguments: []*Node;
+                if callee && callee.kind == .STRUCT polymorphic_arguments = (cast(*Struct) callee).polymorphic_arguments;
+                if callee && callee.kind == .UNION  polymorphic_arguments = (cast(*Union) callee).polymorphic_arguments;
+                for polymorphic_arguments if it.kind == .DECLARATION array_add(*params, cast(*Declaration) it);
+                if params.count current_node = callee;
             }
+
+            call_bindings: [..]Poly_Binding;
+            for proc_call.arguments {
+                index := get_argument_parameter(params, it, it_index);
+                if index < 0 continue;
+
+                _, value := get_named_argument(it);
+                if !value continue;
+
+                array_add(*call_bindings, .{name = params[index].name, decl = params[index], value = value, bindings = bindings});
+                bind_polymorphic(*call_bindings, get_parameter_type(params[index]), value, bindings);
+            }
+
+            if procedure || params.count bindings = call_bindings;
             continue;
         }
 
@@ -1389,7 +1496,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
         _, pointer = get_node_type(pointer.expression);
     }
 
-    return result, pointer;
+    return result, pointer, bindings;
 }
 
 unwrap_polymorphic_constant :: (node: *Node) -> *Node {
@@ -1703,7 +1810,8 @@ get_dot_path :: (binary_op: *Binary_Operation, from: *Node) -> []*Node {
     return path;
 }
 
-get_path_type :: (path: []*Node, return_index := 0) -> *Node, pointer: *Unary_Operation = null {
+get_path_type :: (path: []*Node, return_index := 0, root_bindings: []Poly_Binding = .[]) -> *Node, pointer: *Unary_Operation = null, bindings: []Poly_Binding = .[] {
+    bindings := root_bindings;
     current_type: *Node;
     pointer: *Unary_Operation;
     resolved_nodes: int;
@@ -1761,7 +1869,7 @@ get_path_type :: (path: []*Node, return_index := 0) -> *Node, pointer: *Unary_Op
                         return null;
                     }
 
-                    current_type, pointer = get_node_type(ifx node.kind == .PROCEDURE_CALL then node else identifier, solve_array, select_first_non_procedure_decl, return_index=node_return_index);
+                    current_type, pointer, bindings = get_node_type(ifx node.kind == .PROCEDURE_CALL then node else identifier, solve_array, select_first_non_procedure_decl, return_index=node_return_index, root_bindings = bindings);
                     if !current_type {
                         break;
                     }
@@ -1776,7 +1884,7 @@ get_path_type :: (path: []*Node, return_index := 0) -> *Node, pointer: *Unary_Op
                         break;
                     }
 
-                    current_type, pointer = get_node_type(decl, solve_array, return_index=node_return_index);
+                    current_type, pointer, bindings = get_node_type(decl, solve_array, return_index=node_return_index);
                     resolved_nodes += 1;
                     continue;
                 }
@@ -1788,11 +1896,18 @@ get_path_type :: (path: []*Node, return_index := 0) -> *Node, pointer: *Unary_Op
                     }
 
                     decl := get_block_member(_struct.block, identifier);
+                    if !decl for _struct.polymorphic_arguments {
+                        if it.kind == .DECLARATION && (cast(*Declaration) it).name == identifier.name {
+                            decl = cast(*Declaration) it;
+                            break;
+                        }
+                    }
+
                     if !decl {
                         break;
                     }
 
-                    current_type, pointer = get_node_type(decl, solve_array, return_index=node_return_index);
+                    current_type, pointer, bindings = get_node_type(decl, solve_array, return_index=node_return_index, root_bindings = bindings);
                     if !current_type {
                         break;
                     }
@@ -1804,11 +1919,12 @@ get_path_type :: (path: []*Node, return_index := 0) -> *Node, pointer: *Unary_Op
             case .LITERAL;
                 current_type = node;
                 pointer = null;
+                bindings = .[];
                 resolved_nodes += 1;
 
             case .CAST;
                 _cast := cast(*Cast) node;
-                current_type, pointer = get_node_type(_cast.cast_expression, true);
+                current_type, pointer, bindings = get_node_type(_cast.cast_expression, true, root_bindings = bindings);
                 if !current_type {
                     return null;
                 }
@@ -1829,7 +1945,7 @@ get_path_type :: (path: []*Node, return_index := 0) -> *Node, pointer: *Unary_Op
         _, pointer = get_node_type(pointer.expression);
     }
 
-    return current_type, pointer;
+    return current_type, pointer, bindings;
 }
 
 Base_Type :: enum {
@@ -2036,6 +2152,7 @@ get_best_overload_for_procedure_call :: (procedures: []*Procedure, call: *Proced
         complete := true;
         for params {
             if !filled[it_index] && !it.expression && !is_varargs(it) complete = false;
+            if !filled[it_index] && is_varargs(it) score -= 1;
         }
 
         if (complete && !best_complete) || (complete == best_complete && score > best_score) {

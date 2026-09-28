@@ -4,7 +4,10 @@
 - [x] support for context
 - [ ] goto and autocomplete for struct literals
 - [ ] improve context based autocomplete
-- [ ] polymorphic types
+- [-] polymorphic types
+    - [x] Single parameter structs (`Stack(Entity)`), `$T` procedures (`first`, `New`, `array_add`)
+    - [ ] Multi parameter structs (`Table(K, V)`) - needs jai_parser to split struct parameters on commas
+    - [ ] `for_expansion` iterators (`for table { it. }` over Hash_Table)
 - [ ] ...
 
 ## 0.2.0
