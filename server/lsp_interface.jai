@@ -497,6 +497,7 @@ LSP_Result_Initialize :: struct {
             full := true;
             range := true;
         };
+        inlayHintProvider := true;
         documentSymbolProvider := true;
         workspaceSymbolProvider := true;
 
@@ -557,6 +558,21 @@ LSP_Request_Message_Semantic_Tokens :: struct {
         textDocument: LSP_Text_Document_Identifier;
         range: *LSP_Range;
     }
+}
+
+LSP_Request_Message_Inlay_Hint :: struct {
+    using request: LSP_Request_Message;
+    params: struct {
+        textDocument: LSP_Text_Document_Identifier;
+        range: LSP_Range;
+    }
+}
+
+LSP_Inlay_Hint :: struct {
+    position: LSP_Position;
+    label: string;
+    kind: s64;
+    paddingRight: bool;
 }
 
 LSP_Request_Message_Document_Highlight :: struct {

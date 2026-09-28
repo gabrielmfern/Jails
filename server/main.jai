@@ -420,6 +420,15 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
 
             handle_semantic_tokens(body);
 
+        case "textDocument/inlayHint";
+            success, body := json_parse_string(raw_request, LSP_Request_Message_Inlay_Hint,, temp);
+            if !success {
+                log_error("Unable to parse textDocument/inlayHint message");
+                return;
+            }
+
+            handle_inlay_hint(body);
+
         case "textDocument/didSave";
             success, body := json_parse_string(raw_request, LSP_Did_Save_Text_Document,, temp);
             if !success {
@@ -644,6 +653,7 @@ main :: () {
 #load "rename.jai";
 #load "symbols.jai";
 #load "semantic_tokens.jai";
+#load "inlay_hints.jai";
 #load "utils.jai";
 
 #if OS == .WINDOWS {

@@ -1252,6 +1252,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
     derefs := 0;
     subscripts := 0;
     subscript_pointer: *Unary_Operation;
+    subscript_derefs := 0;
     pending_return_index := return_index;
     resolving_count := resolving_decls.count;
     defer resolving_decls.count = resolving_count;
@@ -1316,6 +1317,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
             subscripts += 1;
             subscript_pointer = pointer;
             subscript_depth = depth;
+            subscript_derefs = derefs;
             current_node = array_subscript.expression;
             continue;
         }
@@ -1327,6 +1329,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                 subscripts -= 1;
                 pointer = subscript_pointer;
                 depth = subscript_depth;
+                derefs = subscript_derefs;
                 current_node = array_type.element_type;
                 continue;
             } else if solve_array {
@@ -1382,6 +1385,12 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
             if decl.type_inst {
                 current_node = decl.type_inst;
+                type_of_call := cast(*Procedure_Call) decl.type_inst;
+                if type_of_call.kind == .PROCEDURE_CALL && type_of_call.arguments.count == 1 && type_of_call.procedure && type_of_call.procedure.kind == .IDENTIFIER && (cast(*Identifier) type_of_call.procedure).name == "type_of" {
+                    type_of_decl := get_procedure_call_decl(type_of_call);
+                    if type_of_decl && type_of_decl.location.file == BUILTINS_PATH current_node = type_of_call.arguments[0];
+                }
+
                 continue;
             }
 
@@ -1960,6 +1969,15 @@ get_path_type :: (path: []*Node, return_index := 0, root_bindings: []Poly_Bindin
                     }
 
                     current_type, pointer, bindings, depth = get_node_type(decl, solve_array, return_index=node_return_index);
+                    resolved_nodes += 1;
+                    continue;
+                }
+
+                if current_type.kind == .ENUM && node.kind == .IDENTIFIER {
+                    if !get_member_in(current_type, identifier) break;
+
+                    pointer = null;
+                    depth = 0;
                     resolved_nodes += 1;
                     continue;
                 }

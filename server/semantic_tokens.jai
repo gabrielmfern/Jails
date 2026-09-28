@@ -191,19 +191,7 @@ handle_semantic_tokens :: (request: LSP_Request_Message_Semantic_Tokens) {
     });
 
     content := cast(string) get_memory_file(file_path);
-    line_starts: [..]int;
-    array_add(*line_starts, 0);
-    for content if it == #char "\n" array_add(*line_starts, it_index + 1);
-
-    utf16_column :: (line: string, byte_column: int) -> int {
-        column := byte_column;
-        for 0..min(byte_column, line.count)-1 {
-            if line[it] & 0xC0 == 0x80 column -= 1;
-            if line[it] >= 0xF0 column += 1;
-        }
-
-        return column;
-    }
+    line_starts := get_line_starts(content);
 
     data: [..]u32;
     previous: Semantic_Token;
@@ -211,8 +199,7 @@ handle_semantic_tokens :: (request: LSP_Request_Message_Semantic_Tokens) {
     for tokens {
         if it_index > 0 && it.line == previous.line && it.column < previous.column + previous.length continue;
 
-        line: string;
-        if it.line < line_starts.count line = slice(content, line_starts[it.line], content.count - line_starts[it.line]);
+        line := get_line(content, line_starts, it.line);
         column := utf16_column(line, it.column);
         length := utf16_column(line, it.column + it.length) - column;
 

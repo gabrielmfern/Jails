@@ -25,7 +25,29 @@ type_name :: (type: *Node, pointer_depth: int) -> string {
     return builder_to_string(*builder,, temp);
 }
 
-to_debug_string :: (node: *Node) -> string {
+get_line_starts :: (content: string) -> []int {
+    line_starts: [..]int;
+    array_add(*line_starts, 0);
+    for content if it == #char "\n" array_add(*line_starts, it_index + 1);
+    return line_starts;
+}
+
+get_line :: (content: string, line_starts: []int, line: int) -> string {
+    if line >= line_starts.count return "";
+    return slice(content, line_starts[line], content.count - line_starts[line]);
+}
+
+utf16_column :: (line: string, byte_column: int) -> int {
+    column := byte_column;
+    for 0..min(byte_column, line.count)-1 {
+        if line[it] & 0xC0 == 0x80 column -= 1;
+        if line[it] >= 0xF0 column += 1;
+    }
+
+    return column;
+}
+
+to_debug_string ::(node: *Node) -> string {
     if !node {
         return "null";
     }
