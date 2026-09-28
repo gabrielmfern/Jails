@@ -88,24 +88,26 @@ load_symbols_from_file :: (file: *Program_File, load_to: *[..]LSP_Document_Symbo
         if node.kind == .DIRECTIVE_SCOPE {
             scope_directive := cast(*Directive_Scope) node;
             for member: scope_directive.members {
-                symbol, ok := lsp_document_symbol_from_node(member, .VARIABLE);
-                if !ok {
-                    continue;
-                }
-
-                array_add(load_to, symbol);
+                add_document_symbols(load_to, member, .VARIABLE);
             }
 
             continue;
         }
 
-        symbol, ok := lsp_document_symbol_from_node(node, .VARIABLE);
-        if !ok {
-            continue;
-        }
-
-        array_add(load_to, symbol);
+        add_document_symbols(load_to, node, .VARIABLE);
     }
+}
+
+add_document_symbols :: (to: *[..]LSP_Document_Symbol, node: *Node, default_symbol_kind: LSP_Symbol_Kind) {
+    if node.kind == .COMPOUND_DECLARATION {
+        decls: [..]*Declaration;
+        compound_declaration_to_declarations(*decls, cast(*Compound_Declaration) node);
+        for decls add_document_symbols(to, it, default_symbol_kind);
+        return;
+    }
+
+    symbol, ok := lsp_document_symbol_from_node(node, default_symbol_kind);
+    if ok array_add(to, symbol);
 }
 
 node_kind_to_symbol_kind :: (expression: *Node, default: LSP_Symbol_Kind) -> LSP_Symbol_Kind {
@@ -136,17 +138,11 @@ lsp_document_symbol_from_node :: (node: *Node, default_symbol_kind: LSP_Symbol_K
         block := get_block_of(node);
         if block {
             for member: block.members {
-                child_symbol, ok := lsp_document_symbol_from_node(member, .FIELD);
-                if !ok {
-                    continue;
-                }
+                add_document_symbols(*children, member, .FIELD);
+            }
 
-                // Override for enum members
-                if node.kind == .ENUM {
-                    child_symbol.kind = cast(s64) LSP_Symbol_Kind.ENUM_MEMBER;
-                }
-
-                array_add(*children, child_symbol);
+            if node.kind == .ENUM {
+                for *children it.kind = cast(s64) LSP_Symbol_Kind.ENUM_MEMBER;
             }
         }
 

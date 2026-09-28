@@ -368,21 +368,9 @@ node_visit :: (node: *Node, data: Node_Visit_Data) {
     file := data.file;
 
     if node.kind == .COMPOUND_DECLARATION {
-        compound_declaration := cast(*Compound_Declaration) node;
-        for member: compound_declaration.members {
-            if member.kind != .COMPOUND_DECLARATION_ITEM continue;
-            item := cast(*Compound_Declaration_Item) member;
-            if item.item_kind != .DECLARATION || item.expression.kind != .IDENTIFIER continue;
-            decl_ident := cast(*Identifier) item.expression;
-
-            // @TODO: is this ok? Do we really wan't to create "virtual" decl here?
-            decl := New(Declaration);
-            decl.parent = decl_ident.parent;
-            decl.location = decl_ident.location;
-            decl.name = decl_ident.name;
-
-            table_add(*file.declarations, decl.name, decl);
-        }
+        decls: [..]*Declaration;
+        compound_declaration_to_declarations(*decls, cast(*Compound_Declaration) node);
+        for decls table_add(*file.declarations, it.name, it);
     }
 
     if node.kind == .DECLARATION {
@@ -956,7 +944,7 @@ is_parent_of :: (parent: *Node, node: *Node, limit := 5) -> bool {
 is_global :: (node: *Node, from_file: *Program_File, it_file: *Program_File, from_import: bool) -> bool {
     if !node.parent return true;
 
-    if node.parent.kind == .BLOCK {
+    if node.parent.kind == .BLOCK || node.parent.kind == .COMPOUND_DECLARATION_ITEM || node.parent.kind == .COMPOUND_DECLARATION {
         return is_global(node.parent, from_file, it_file, from_import);
     }
 
@@ -1140,15 +1128,16 @@ select_first_decl :: (decls: []*Declaration, level: int) -> *Declaration {
     return decls[0];
 }
 
-get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false, derefs := 0) -> *Node, pointer: *Node = null {
+get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false, derefs := 0, return_index := 0) -> *Node, pointer: *Node = null {
     current_node: *Node = root;
     pointer: *Node;
     pending_derefs := derefs;
+    pending_return_index := return_index;
 
     level: int;
     while true {
         defer level += 1;
-        if !current_node break;
+        if !current_node || level > 1024 break;
 
         // log("Resolving type: % (%:%:%)", current_node.kind, current_node.location.file, current_node.location.l0, current_node.location.c0);
 
@@ -1230,6 +1219,13 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                 continue;
             }
 
+            if decl.expression && decl.parent && decl.parent.kind == .COMPOUND_DECLARATION_ITEM {
+                comp_decl := cast(*Compound_Declaration) decl.parent.parent;
+                if decl.expression == comp_decl.type_inst.expression {
+                    _, pending_return_index = array_find(comp_decl.members, decl.parent);
+                }
+            }
+
             if decl.expression {
                 current_node = decl.expression;
                 continue;
@@ -1261,7 +1257,8 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                     }
                 case;
                     path := get_dot_path(bin_op, null);
-                    path_type, path_pointer = get_path_type(path);
+                    path_type, path_pointer = get_path_type(path, return_index=pending_return_index);
+                    pending_return_index = 0;
             }
 
             current_node = ifx path_pointer then path_pointer else path_type;
@@ -1281,8 +1278,9 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                 return proc;
             }
 
-            if proc.returns.count > 0 {
-                current_node = proc.returns[0].expression;
+            if pending_return_index < proc.returns.count {
+                current_node = proc.returns[pending_return_index].expression;
+                pending_return_index = 0;
                 continue;
             }
         }
@@ -1485,6 +1483,11 @@ get_block_member :: (block: *Block, ident: *Identifier) -> *Declaration {
                 decl := cast(*Declaration) member;
                 if decl.name == ident.name return xx member;
 
+            case .COMPOUND_DECLARATION;
+                decls: [..]*Declaration;
+                compound_declaration_to_declarations(*decls, cast(*Compound_Declaration) member, ident.name);
+                if decls.count > 0 return decls[0];
+
             case .DIRECTIVE_AS; #through;
             case .USING;
                 used_expression := get_used_expression(member);
@@ -1609,7 +1612,7 @@ get_dot_path :: (binary_op: *Binary_Operation, from: *Node) -> []*Node {
     return path;
 }
 
-get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node, pointer: *Node = null {
+get_path_type :: (path: []*Node, recursion_limit: s16 = 1024, return_index := 0) -> *Node, pointer: *Node = null {
     current_type: *Node;
     pointer: *Node;
     resolved_nodes: int;
@@ -1624,6 +1627,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node, pointer:
     for path_node: path {
         node := path_node;
         derefs := 0;
+        node_return_index := ifx it_index == path.count - 1 then return_index else 0;
         while node && node.kind == .UNARY_OPERATION && (cast(*Unary_Operation) node).operation == .POINTER_DEREFERENCE {
             derefs += 1;
             node = (cast(*Unary_Operation) node).expression;
@@ -1673,7 +1677,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node, pointer:
                     }
 
                     select_decl := ifx node.kind == .PROCEDURE_CALL then select_first_decl else select_first_non_procedure_decl;
-                    current_type, pointer = get_node_type(identifier, solve_array, select_decl, derefs=derefs);
+                    current_type, pointer = get_node_type(identifier, solve_array, select_decl, derefs=derefs, return_index=node_return_index);
                     if !current_type {
                         break;
                     }
@@ -1688,7 +1692,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node, pointer:
                         break;
                     }
 
-                    current_type, pointer = get_node_type(decl, solve_array, derefs=derefs);
+                    current_type, pointer = get_node_type(decl, solve_array, derefs=derefs, return_index=node_return_index);
                     resolved_nodes += 1;
                     continue;
                 }
@@ -1704,7 +1708,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node, pointer:
                         break;
                     }
 
-                    current_type, pointer = get_node_type(decl, solve_array, derefs=derefs);
+                    current_type, pointer = get_node_type(decl, solve_array, derefs=derefs, return_index=node_return_index);
                     if !current_type {
                         break;
                     }
@@ -1909,13 +1913,11 @@ is_dot_binary_op :: (node: *Node) -> bool {
 }
 
 compound_declaration_to_declarations :: (decls: *[..]*Declaration, comp_decl: *Compound_Declaration, filter_name: string = "") {
-    type_or_value_expr: *Node;
+    type_inst: *Node;
+    value_expr: *Node;
     if comp_decl.type_inst {
-        if comp_decl.type_inst.expression {
-            type_or_value_expr = comp_decl.type_inst.expression;
-        } else if comp_decl.type_inst.type_inst {
-            type_or_value_expr = comp_decl.type_inst.type_inst;
-        }
+        type_inst = comp_decl.type_inst.type_inst;
+        value_expr = comp_decl.type_inst.expression;
     }
 
     for comp_member: comp_decl.members {
@@ -1934,40 +1936,18 @@ compound_declaration_to_declarations :: (decls: *[..]*Declaration, comp_decl: *C
             continue;
         }
 
-        item_expr: *Node = *unknown_identifier_node;
-        if type_or_value_expr {
-            if type_or_value_expr.kind == .IDENTIFIER {
-                item_expr = type_or_value_expr;
-            }
-
-            if type_or_value_expr.kind == .COMMA_SEPARATED_EXPRESSION {
-                comma_sep_expr := cast(*Comma_Separated_Expression) type_or_value_expr;
-
-                if comma_sep_expr.members.count > it_index {
-                    item_expr = comma_sep_expr.members[it_index];
-                }
-            }
-
-            if type_or_value_expr.kind == .PROCEDURE_CALL {
-                proc_call := cast(*Procedure_Call) type_or_value_expr;
-
-                proc_node := get_node_type(proc_call, stop_at_procedure = true);
-
-                if proc_node.kind == .PROCEDURE {
-                    proc := cast(*Procedure) proc_node;
-
-                    if it_index < proc.returns.count {
-                        item_expr = proc.returns[it_index];
-                    }
-                }
-            }
+        item_expr := value_expr;
+        if value_expr && value_expr.kind == .COMMA_SEPARATED_EXPRESSION {
+            comma_sep_expr := cast(*Comma_Separated_Expression) value_expr;
+            item_expr = ifx it_index < comma_sep_expr.members.count then comma_sep_expr.members[it_index] else null;
         }
 
-        // @TODO: is this ok? Do we really wan't to create "virtual" decl here?
         decl := New(Declaration);
-        decl.parent = comp_item_ident.parent;
+        decl.parent = comp_item;
         decl.location = comp_item_ident.location;
         decl.name = comp_item_ident.name;
+        decl.const = comp_decl.const;
+        decl.type_inst = type_inst;
         decl.expression = item_expr;
 
         array_add(decls, decl);

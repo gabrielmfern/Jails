@@ -32,7 +32,7 @@
 - [ ] Make root detection more robust - it should work quite well even without `jails.json` and it also should work with multiple entry points.
 - [ ] Implement basic procedure overload resolution
 - [x] Autocomplete deref on pointer (`entity.*`)
-- [ ] Support for compound declaration (`x,y,z: float;`)
+- [x] Support for compound declaration (`x,y,z: float;`)
 - [ ] Autocomplete buildin procedures (`size_of`, `type_of` ...)
 - [ ] Mason registry (nvim)
 - [ ] Implement "fake" methods completions for types that are taken as the first argument of some procedures
