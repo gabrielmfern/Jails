@@ -25,6 +25,21 @@ Program_File :: struct {
     analysis_pool: Pool;
 }
 
+Global_Declarations_Key :: struct {
+    file: *Program_File;
+    name: string;
+}
+
+global_declarations_key_hash :: (key: Global_Declarations_Key) -> u32 {
+    return get_hash(key.name, get_hash(key.file));
+}
+
+global_declarations_key_compare :: (a: Global_Declarations_Key, b: Global_Declarations_Key) -> bool {
+    return a.file == b.file && a.name == b.name;
+}
+
+BUILTIN_TYPES :: string.["string", "bool", "int", "s8", "s16", "s32", "s64", "u8", "u16", "u32", "u64", "float", "float32", "float64", "void", "Any", "Type", "Code"];
+
 Linked_File :: struct {
     from_import: bool;
     file: *Program_File;
@@ -89,18 +104,6 @@ get_file :: (path: string) -> *Program_File {
     ok, file := table_find(*server.files, path);
     if !ok return null;
     return file;
-}
-
-search_for_file :: (name: string) -> *Program_File {
-    final_file: *Program_File;
-
-    for file, file_name: server.files {
-        if contains(file_name, name) {
-            final_file = file;
-        }
-    }
-
-    return final_file;
 }
 
 normalize_path :: (path: string) -> string {
@@ -292,7 +295,7 @@ rebuild_context_model :: () {
         fields: [..]*Declaration;
         members: [..]*Node;
 
-        runtime_support_file := search_for_file("modules/Runtime_Support.jai");
+        runtime_support_file := server.runtime_support_file;
         if runtime_support_file {
             ok, context_base_decl := table_find(*runtime_support_file.declarations, "Context_Base");
             if ok && context_base_decl.expression && context_base_decl.expression.kind == .STRUCT {
@@ -327,31 +330,32 @@ analyze_files :: () {
         release(*file.analysis_pool);
     }
 
+    release(*server.global_declarations_pool);
+    server.global_declarations = .{};
+
     resolve_file_graph();
 
-    preload_file: *Program_File;
-    runtime_support_file: *Program_File;
     builtins_file := get_file(BUILTINS_PATH);
 
     for file: server.files {
-        if !runtime_support_file && contains(file.path, "Runtime_Support.jai") {
-            runtime_support_file = file;
+        if !server.runtime_support_file && contains(file.path, "Runtime_Support.jai") {
+            server.runtime_support_file = file;
         }
 
-        if !preload_file && contains(file.path, "Preload.jai") {
-            preload_file = file;
+        if !server.preload_file && contains(file.path, "Preload.jai") {
+            server.preload_file = file;
         }
     }
 
     for file: server.files_to_be_analyzed {
         linked_files := get_file_links(file,, pool_alloc(*file.analysis_pool));
 
-        if file != preload_file && preload_file {
-            array_add(*linked_files, .{ file=preload_file, from_import=true });
+        if file != server.preload_file && server.preload_file {
+            array_add(*linked_files, .{ file=server.preload_file, from_import=true });
         }
 
-        if file != runtime_support_file && runtime_support_file {
-            array_add(*linked_files, .{ file=runtime_support_file, from_import=true });
+        if file != server.runtime_support_file && server.runtime_support_file {
+            array_add(*linked_files, .{ file=server.runtime_support_file, from_import=true });
         }
 
         if file != builtins_file && builtins_file {
@@ -776,7 +780,7 @@ get_declarations_from_parent :: (decls: *[..]*Declaration, node: *Node, from_loc
             for block.members {
 
                 // We only accept `nodes` if they were declared before our cursor/node location.
-                if from_loc.l0 < it.location.l0 continue;
+                if from_loc.l0 < it.location.l0 break;
 
                 if it.kind == {
                     case .USING; // @TODO: solve crash when having two using
@@ -817,8 +821,24 @@ get_declarations_from_parent :: (decls: *[..]*Declaration, node: *Node, from_loc
 get_declarations :: (file: *Program_File, from_node: *Node = null, from_loc: *Node.Location = null, name := "", only_loaded := false) -> []*Declaration {
     decls: [..]*Declaration;
 
-    // Globals in all linked files (loaded or imported)
-    if file {
+    if file && name.count > 0 && !only_loaded {
+        found, globals := table_find(*server.global_declarations, .{file, name});
+        if !found {
+            push_allocator(pool_alloc(*server.global_declarations_pool));
+
+            new_globals: [..]*Declaration;
+            for linked_file: file.linked_files {
+                for decl: table_find_multiple(*linked_file.file.declarations, name) {
+                    if is_global(decl, file, linked_file.file, linked_file.from_import) array_add(*new_globals, decl);
+                }
+            }
+
+            globals = new_globals;
+            table_add(*server.global_declarations, .{file, copy_string(name)}, globals);
+        }
+
+        array_add(*decls, ..globals);
+    } else if file { // Globals in all linked files (loaded or imported)
         for linked_file: file.linked_files {
             // log("Linked file: %", linked_file.file.path);
 
@@ -1609,7 +1629,7 @@ get_type_info_subtype :: (type_expression: *Node) -> *Declaration {
 
     if !name return null;
 
-    preload := search_for_file("modules/Preload.jai");
+    preload := server.preload_file;
     if !preload return null;
 
     ok, decl := table_find(*preload.declarations, name);
@@ -1620,7 +1640,7 @@ get_type_info_subtype :: (type_expression: *Node) -> *Declaration {
 
 // This depends on Preload having this type. We need to keep this in sync with the compiler.
 get_internal_array_struct ::(resizable: bool) -> *Struct {
-    preload := search_for_file("modules/Preload.jai");
+    preload := server.preload_file;
     if !preload {
         return null;
     }
@@ -1640,7 +1660,7 @@ get_internal_array_struct ::(resizable: bool) -> *Struct {
 
 // This depends on Preload having this type. We need to keep this in sync with the compiler.
 get_internal_string_struct :: () -> *Struct {
-    preload := search_for_file("modules/Preload.jai");
+    preload := server.preload_file;
     if !preload {
         return null;
     }

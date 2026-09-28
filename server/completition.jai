@@ -456,13 +456,12 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
 
 add_basic_keywords :: (completions: *[..]LSP_Completion_Item) {
     KEYWORDS :: string.[
-        "string", "bool", "int", "s8", "s16", "s32", "s64", "u8", "u16", "u32", "u64",
-        "float", "float32", "float64", "void", "Any", "Type", "Code",
         "struct", "union", "enum", "enum_flags", "interface", "operator",
         "if", "ifx", "then", "else", "case", "for", "while", "break", "continue", "remove", "return", "defer",
         "using", "inline", "no_inline", "cast", "xx", "push_context", "context", "null", "true", "false",
     ];
 
+    for BUILTIN_TYPES array_add(completions, .{label=it, insertText=it, kind=xx LSP_Completion_Item.Kind.Keyword});
     for KEYWORDS array_add(completions, .{label=it, insertText=it, kind=xx LSP_Completion_Item.Kind.Keyword});
 
     // array_add(completions, .{label="#if", insertText="#if", kind=cast(u8) LSP_Completion_Item.Kind.Keyword});

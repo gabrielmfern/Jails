@@ -489,7 +489,14 @@ LSP_Request_Message_Initialize :: struct {
 
 LSP_Result_Initialize :: struct {
     capabilities: struct {
-        //semanticTokensProvider := true;
+        semanticTokensProvider: struct {
+            legend: struct {
+                tokenTypes := string.["namespace", "type", "struct", "enum", "typeParameter", "parameter", "variable", "property", "enumMember", "function"];
+                tokenModifiers := string.["declaration", "readonly", "static", "defaultLibrary"];
+            };
+            full := true;
+            range := true;
+        };
         documentSymbolProvider := true;
         workspaceSymbolProvider := true;
 
@@ -542,6 +549,14 @@ LSP_Request_Message_References :: struct {
 LSP_Request_Message_Implementation :: struct {
     using request: LSP_Request_Message;
     params: LSP_Text_Document_Position;
+}
+
+LSP_Request_Message_Semantic_Tokens :: struct {
+    using request: LSP_Request_Message;
+    params: struct {
+        textDocument: LSP_Text_Document_Identifier;
+        range: *LSP_Range;
+    }
 }
 
 LSP_Request_Message_Document_Highlight :: struct {

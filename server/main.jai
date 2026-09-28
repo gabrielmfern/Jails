@@ -35,6 +35,13 @@ Server :: struct {
     files_to_be_analyzed: [..]*Program_File;
     context_model: Context_Model;
 
+    preload_file: *Program_File;
+    runtime_support_file: *Program_File;
+    jai_path_prefix: string;
+
+    global_declarations_pool: Pool;
+    global_declarations: Table(Global_Declarations_Key, []*Declaration, global_declarations_key_hash, global_declarations_key_compare);
+
     memory_files_lock: Mutex;
     memory_files: Table(string, [..]u8); // @todo: This is probably dumb - store files as array of lines instead (is this good idea?) // @ToDo: Keep track of a modified flag per file
 
@@ -322,6 +329,7 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
 
             log("Project Root: %", server.project_root);
             load_config_file();
+            server.jai_path_prefix = sprint("%/", trim_right(normalize_path(server.args.jai_path,, temp), "/"));
 
             if server.build_root.count == 0 {
                 server.build_root = find_entry_file(server.project_root);
@@ -401,6 +409,16 @@ handle_request :: (request: LSP_Request_Message, raw_request: string) {
             }
 
             handle_document_highlight(body);
+
+        case "textDocument/semanticTokens/full"; #through;
+        case "textDocument/semanticTokens/range";
+            success, body := json_parse_string(raw_request, LSP_Request_Message_Semantic_Tokens,, temp);
+            if !success {
+                log_error("Unable to parse % message", request.method);
+                return;
+            }
+
+            handle_semantic_tokens(body);
 
         case "textDocument/didSave";
             success, body := json_parse_string(raw_request, LSP_Did_Save_Text_Document,, temp);
@@ -556,8 +574,10 @@ main :: () {
     defer deinit(*server.files);
 
     set_allocators(*server.context_model.pool, context.default_allocator);
+    set_allocators(*server.global_declarations_pool, context.default_allocator);
 
     server.files_to_be_analyzed.allocator = context.default_allocator;
+    resolving_decls.allocator = context.default_allocator;
 
     init_memory_files();
     defer deinit_memory_files();
@@ -607,6 +627,8 @@ main :: () {
 #import "jai_parser";
 #import "Default_Allocator";
 #import "System";
+#import "Sort";
+#import "Hash";
 
 #load "rpc.jai";
 #load "lsp_interface.jai";
@@ -621,6 +643,7 @@ main :: () {
 #load "hover.jai";
 #load "rename.jai";
 #load "symbols.jai";
+#load "semantic_tokens.jai";
 #load "utils.jai";
 
 #if OS == .WINDOWS {
