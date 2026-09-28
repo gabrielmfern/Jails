@@ -46,10 +46,6 @@ handle_completitions :: (request: LSP_Request_Message_Completion) {
             return;
         }
 
-        if handle_assignment_completitions(request, cursor_node) {
-            return;
-        }
-
         if handle_case_completions(request, cursor_node) {
             return;
         }
@@ -280,33 +276,6 @@ handle_case_completions :: (request: LSP_Request_Message_Completion, cursor_node
     return false;
 }
 
-handle_assignment_completitions :: (request: LSP_Request_Message_Completion, cursor_node: *Node) -> bool {
-    op: *Binary_Operation;
-    if cursor_node.kind == .BINARY_OPERATION {
-        op = cast(*Binary_Operation, cursor_node);
-    } else if cursor_node.parent && cursor_node.parent.kind == .BINARY_OPERATION {
-        op = cast(*Binary_Operation, cursor_node.parent);
-    } else {
-        return false;
-    }
-
-    if op.operation != .ASSIGN && op.operation != .IS_EQUAL && op.operation != .IS_NOT_EQUAL {
-        return false;
-    }
-
-    // @TODO: support more types!
-    if cursor_node.kind != .UNARY_OPERATION {
-        return false;
-    }
-
-    left_type := get_node_type(op, true);
-    if !left_type {
-        return false;
-    }
-
-    return handle_completitions_for_node(request, left_type);
-}
-
 handle_struct_literal_completions :: (request: LSP_Request_Message_Completion, cursor_node: *Node) -> bool {
     literal: *Literal;
     if cursor_node.kind == .LITERAL {
@@ -349,9 +318,14 @@ handle_enum_literal_completions :: (request: LSP_Request_Message_Completion, cur
         return false;
     }
 
+    if unary_op.operation != .DOT {
+        return false;
+    }
+
     enum_type := get_enum_literal_type(unary_op);
     if !enum_type {
-        return false;
+        lsp_respond(request.id, null);
+        return true;
     }
 
     return handle_completitions_for_node(request, enum_type);
