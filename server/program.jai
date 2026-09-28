@@ -1140,8 +1140,10 @@ select_first_decl :: (decls: []*Declaration, level: int) -> *Declaration {
     return decls[0];
 }
 
-get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false) -> *Node {
+get_node_type :: (root: *Node, solve_array := false, select_decl := select_first_decl, stop_at_procedure := false, derefs := 0) -> *Node, pointer: *Node = null {
     current_node: *Node = root;
+    pointer: *Node;
+    pending_derefs := derefs;
 
     level: int;
     while true {
@@ -1160,7 +1162,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
             if ident_decls.count == 0 {
                 // log("Does not find anything for '%'...", ident.name);
-                return current_node;
+                return current_node, pointer;
             }
 
             current_node = select_decl(ident_decls, level);
@@ -1168,20 +1170,8 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
             continue;
         }
 
-        if current_node.kind == .STRUCT {
-            return current_node;
-        }
-
-        if current_node.kind == .UNION {
-            return current_node;
-        }
-
-        if current_node.kind == .ENUM {
-            return current_node;
-        }
-
-        if current_node.kind == .DIRECTIVE_IMPORT {
-            return current_node;
+        if current_node.kind == .STRUCT || current_node.kind == .UNION || current_node.kind == .ENUM || current_node.kind == .DIRECTIVE_IMPORT {
+            return current_node, pointer;
         }
 
         if current_node.kind == .DIRECTIVE_CONTEXT {
@@ -1198,10 +1188,11 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
             array_type := cast(*Array_Type, current_node);
 
             if solve_array {
+                pointer = null;
                 current_node = array_type.element_type;
                 continue;
             } else {
-                return array_type;
+                return array_type, pointer;
             }
         }
 
@@ -1254,6 +1245,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
 
         if current_node.kind == .BINARY_OPERATION {
             bin_op := cast(*Binary_Operation)current_node;
+            path_type, path_pointer: *Node;
 
             if bin_op.operation == {
                 case .IS_NOT_EQUAL;
@@ -1263,15 +1255,16 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                 case .ASSIGN;
                     if bin_op.left.kind == .BINARY_OPERATION {
                         path := get_dot_path(xx bin_op.left, null);
-                        current_node = get_path_type(path);
+                        path_type, path_pointer = get_path_type(path);
                     } else {
-                        current_node = get_path_type(.[bin_op.left]);
+                        path_type, path_pointer = get_path_type(.[bin_op.left]);
                     }
                 case;
                     path := get_dot_path(bin_op, null);
-                    current_node = get_path_type(path);
+                    path_type, path_pointer = get_path_type(path);
             }
 
+            current_node = ifx path_pointer then path_pointer else path_type;
             continue;
         }
 
@@ -1317,7 +1310,13 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
         if current_node.kind == .UNARY_OPERATION {
             unary_op := cast(*Unary_Operation) current_node;
             if unary_op.operation == .POINTER {
-                current_node = unwrap_pointer(xx current_node);
+                if pending_derefs > 0 {
+                    pending_derefs -= 1;
+                } else if !pointer {
+                    pointer = unary_op;
+                }
+
+                current_node = unary_op.expression;
                 continue;
             }
 
@@ -1326,6 +1325,7 @@ get_node_type :: (root: *Node, solve_array := false, select_decl := select_first
                     break;
                 }
 
+                pending_derefs += 1;
                 current_node = unary_op.expression;
                 continue;
             }
@@ -1353,17 +1353,6 @@ unwrap_polymorphic_constant :: (node: *Node) -> *Node {
     const := cast(*Polymorphic_Constant) node;
 
     return const.expression;
-}
-
-unwrap_pointer :: (unary_op: *Unary_Operation) -> *Node {
-    if unary_op.operation != .POINTER return unary_op;
-
-    // nested pointers
-    if unary_op.expression.kind == .UNARY_OPERATION {
-        return unwrap_pointer(xx unary_op.expression);
-    }
-
-    return unary_op.expression;
 }
 
 get_block_of :: (node: *Node) -> *Block {
@@ -1472,15 +1461,6 @@ get_members_in :: (parent: *Node, ident: *Identifier) -> []*Declaration {
     array_add(*decls, block_member);
 
     return decls;
-}
-
-get_block_member_type :: (block: *Block, ident: *Identifier, solve_array := false) -> *Node {
-    decl := get_block_member(block, ident);
-    if !decl {
-        return null;
-    }
-
-    return get_node_type(decl, solve_array);
 }
 
 get_block_member :: (block: *Block, ident: *Identifier) -> *Declaration {
@@ -1629,8 +1609,9 @@ get_dot_path :: (binary_op: *Binary_Operation, from: *Node) -> []*Node {
     return path;
 }
 
-get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node {
+get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node, pointer: *Node = null {
     current_type: *Node;
+    pointer: *Node;
     resolved_nodes: int;
 
     if recursion_limit <= 0 {
@@ -1640,7 +1621,14 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node {
         return null;
     }
 
-    for node: path {
+    for path_node: path {
+        node := path_node;
+        derefs := 0;
+        while node && node.kind == .UNARY_OPERATION && (cast(*Unary_Operation) node).operation == .POINTER_DEREFERENCE {
+            derefs += 1;
+            node = (cast(*Unary_Operation) node).expression;
+        }
+
         if !node break;
 
         if node.kind == {
@@ -1684,7 +1672,8 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node {
                         return null;
                     }
 
-                    current_type = get_node_type(identifier, solve_array, select_first_non_procedure_decl);
+                    select_decl := ifx node.kind == .PROCEDURE_CALL then select_first_decl else select_first_non_procedure_decl;
+                    current_type, pointer = get_node_type(identifier, solve_array, select_decl, derefs=derefs);
                     if !current_type {
                         break;
                     }
@@ -1699,7 +1688,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node {
                         break;
                     }
 
-                    current_type = get_node_type(decl, solve_array);
+                    current_type, pointer = get_node_type(decl, solve_array, derefs=derefs);
                     resolved_nodes += 1;
                     continue;
                 }
@@ -1710,49 +1699,28 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node {
                         break;
                     }
 
-                    type := get_block_member_type(_struct.block, identifier, solve_array);
-                    if !type {
-                        // log_error("Failed to get member type for %", identifier.name);
+                    decl := get_block_member(_struct.block, identifier);
+                    if !decl {
                         break;
                     }
 
-                    current_type = type;
+                    current_type, pointer = get_node_type(decl, solve_array, derefs=derefs);
+                    if !current_type {
+                        break;
+                    }
+
                     resolved_nodes += 1;
                     continue;
                 }
 
             case .LITERAL;
                 current_type = node;
+                pointer = null;
                 resolved_nodes += 1;
-
-            case .UNARY_OPERATION;
-                _unary_op := cast(*Unary_Operation) node;
-                if _unary_op.operation == .POINTER_DEREFERENCE {
-                    if !_unary_op.expression {
-                        break;
-                    }
-
-                    current_type = get_node_type(_unary_op.expression, true);
-                    if !current_type {
-                        break;
-                    }
-
-                    resolved_nodes += 1;
-                }
 
             case .CAST;
                 _cast := cast(*Cast) node;
-
-                cast_type := _cast.cast_expression;
-                if cast_type && cast_type.kind == .UNARY_OPERATION {
-                    cast_type = unwrap_pointer(cast(*Unary_Operation) _cast.cast_expression);
-                }
-
-                if !cast_type {
-                    break;
-                }
-
-                current_type = get_node_type(cast_type, true);
+                current_type, pointer = get_node_type(_cast.cast_expression, true, derefs=derefs);
                 if !current_type {
                     return null;
                 }
@@ -1772,7 +1740,7 @@ get_path_type :: (path: []*Node, recursion_limit: s16 = 1024) -> *Node {
         return null;
     }
 
-    return current_type;
+    return current_type, pointer;
 }
 
 Base_Type :: enum {

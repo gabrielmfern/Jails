@@ -239,13 +239,13 @@ handle_dot_completitions :: (request: LSP_Request_Message_Completion, cursor_nod
 
     array_reverse(path);
 
-    type := get_path_type(path);
+    type, pointer := get_path_type(path);
     if !type {
         lsp_respond(request.id, null);
         return true;
     }
 
-    return handle_completitions_for_node(request, type);
+    return handle_completitions_for_node(request, type, pointer);
 }
 
 handle_types_in_declaration :: (request: LSP_Request_Message_Completion, cursor_node: *Node) -> bool {
@@ -358,7 +358,7 @@ handle_enum_literal_completions :: (request: LSP_Request_Message_Completion, cur
     return handle_completitions_for_node(request, enum_type);
 }
 
-handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node: *Node) -> bool {
+handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node: *Node, pointer: *Node = null) -> bool {
     decls: [..]*Declaration;
     defer array_free(decls);
 
@@ -409,7 +409,7 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
                 case "string";
                     internal_string_struct := get_internal_string_struct();
                     if internal_string_struct {
-                        return handle_completitions_for_node(request, internal_string_struct);
+                        return handle_completitions_for_node(request, internal_string_struct, pointer);
                     }
             }
 
@@ -420,7 +420,7 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
                 case .STRING;
                     internal_string_struct := get_internal_string_struct();
                     if internal_string_struct {
-                        return handle_completitions_for_node(request, internal_string_struct);
+                        return handle_completitions_for_node(request, internal_string_struct, pointer);
                     }
 
                 case .ARRAY;
@@ -446,6 +446,12 @@ handle_completitions_for_node :: (request: LSP_Request_Message_Completion, node:
     // if decls.count == 0 {
     //     return false;
     // }
+
+    deref_decl: Declaration;
+    if pointer {
+        deref_decl = .{name = "*", type_inst = (cast(*Unary_Operation) pointer).expression};
+        array_add(*decls, *deref_decl);
+    }
 
     send_completions_decls(request, decls);
 

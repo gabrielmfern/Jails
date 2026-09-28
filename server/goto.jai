@@ -242,35 +242,25 @@ handle_goto_import :: (request: LSP_Request_Message_Definition, file: *Program_F
 resolve_dot_member :: (ident: *Identifier) -> handled: bool, decl: *Declaration {
     if !ident || !ident.parent return false, null;
 
-    leaf_node: *Node;
-    op: *Binary_Operation;
-
-    if ident.parent.kind == {
-        case .BINARY_OPERATION;
-            op = cast(*Binary_Operation) ident.parent;
-            leaf_node = ident;
-
-        case .ARRAY_SUBSCRIPT;
-            array_subscript := cast(*Array_Subscript) ident.parent;
-            if array_subscript.parent && array_subscript.parent.kind == .BINARY_OPERATION {
-                op = cast(*Binary_Operation) array_subscript.parent;
-                leaf_node = array_subscript;
-            }
-
-        case .PROCEDURE_CALL;
-            proc_call := cast(*Procedure_Call) ident.parent;
-            if proc_call.parent && proc_call.parent.kind == .BINARY_OPERATION {
-                op = cast(*Binary_Operation) proc_call.parent;
-                leaf_node = proc_call;
-            }
-
-        // @TODO: anything else?
+    leaf_node: *Node = ident;
+    while leaf_node.parent {
+        parent := leaf_node.parent;
+        if parent.kind == .ARRAY_SUBSCRIPT && (cast(*Array_Subscript) parent).expression == leaf_node {
+            leaf_node = parent;
+        } else if parent.kind == .PROCEDURE_CALL && (cast(*Procedure_Call) parent).procedure == leaf_node {
+            leaf_node = parent;
+        } else if parent.kind == .UNARY_OPERATION && (cast(*Unary_Operation) parent).operation == .POINTER_DEREFERENCE {
+            leaf_node = parent;
+        } else {
+            break;
+        }
     }
 
-    if !op {
+    if !leaf_node.parent || leaf_node.parent.kind != .BINARY_OPERATION {
         return false, null;
     }
 
+    op := cast(*Binary_Operation) leaf_node.parent;
     path := get_dot_path(op, leaf_node);
     if path.count < 2 {
         return false, null;

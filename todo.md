@@ -31,7 +31,7 @@
     - [ ] Modules (`using Math :: #import "Math";`)
 - [ ] Make root detection more robust - it should work quite well even without `jails.json` and it also should work with multiple entry points.
 - [ ] Implement basic procedure overload resolution
-- [ ] Autocomplete deref on pointer (`entity.*`)
+- [x] Autocomplete deref on pointer (`entity.*`)
 - [ ] Support for compound declaration (`x,y,z: float;`)
 - [ ] Autocomplete buildin procedures (`size_of`, `type_of` ...)
 - [ ] Mason registry (nvim)
