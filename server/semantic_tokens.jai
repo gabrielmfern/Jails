@@ -78,6 +78,8 @@ classify_declaration :: (decl: *Declaration, depth := 0) -> Semantic_Token_Type,
         }
     }
 
+    if decl.type_inst && decl.type_inst.kind == .PROCEDURE return .FUNCTION, library;
+
     modifiers: Semantic_Token_Modifiers;
     if decl.const modifiers = .READONLY;
 
