@@ -17,6 +17,7 @@ Program_File :: struct {
     nodes: [..]*Node;
     global_block: Block;
     declarations: Table(string, *Declaration);
+    usings: [..]*Using;
     comments: [..]Comment_Token;
     // resolved_identifiers: Table(*Identifier, []*Declaration);
     linked_files: []Linked_File; // @TODO: this is probably stupid name for this!
@@ -92,6 +93,7 @@ array_count_declaration := Declaration.{
 reset_file :: (using file: *Program_File) {
     table_reset(*declarations);
     array_reset(*nodes);
+    array_reset(*usings);
     array_reset(*loads);
     array_reset(*imports);
     array_reset(*comments);
@@ -420,6 +422,10 @@ node_visit :: (node: *Node, data: Node_Visit_Data) {
 
     if node.kind == .USING {
         _using := cast(*Using) node;
+        if _using.expression && _using.expression.kind == .IDENTIFIER {
+            array_add(*file.usings, _using);
+        }
+
         if _using.expression && _using.expression.kind == .DECLARATION {
             decl := cast(*Declaration) _using.expression;
             if decl.expression && decl.expression.kind == .DIRECTIVE_IMPORT {
@@ -605,6 +611,12 @@ add_all_fields_of :: (decls: *[..]*Declaration, node: *Node, filter_name: string
             case .UNION;
                 add_all_fields_of(decls, member);
 
+            case .IF;
+                _if := cast(*If) member;
+                if !_if.compile_time continue;
+                add_all_fields_of(decls, _if._then, filter_name);
+                add_all_fields_of(decls, _if._else, filter_name);
+
             case .COMPOUND_DECLARATION;
                 compound_declaration_to_declarations(decls, cast(*Compound_Declaration) member, filter_name);
 
@@ -631,22 +643,18 @@ add_all_fields_of :: (decls: *[..]*Declaration, node: *Node, filter_name: string
 }
 
 // @TODO: Refactor this! (stupid global variable)
-skip_using: *Using;
+expanding_usings: [..]*Using;
 
 add_decls_from_using :: (decls: *[..]*Declaration, _using: *Using, name: string) {
-    if skip_using == _using || !_using.expression || _using.expression.kind != .IDENTIFIER return;
+    if array_find(expanding_usings, _using) || !_using.expression || _using.expression.kind != .IDENTIFIER return;
 
-    ident := cast(*Identifier) _using.expression;
-
-    copied_using := skip_using;
-    skip_using = _using;
+    array_add(*expanding_usings, _using);
+    defer pop(*expanding_usings);
 
     used_type := get_node_type(_using.expression);
     if !used_type return;
 
     add_all_fields_of(decls, used_type, name);
-
-    skip_using = copied_using;
 }
 
 get_declarations_from_for :: (decls: *[..]*Declaration, node: *Node, from_loc: *Node.Location, name := "") {
@@ -823,6 +831,10 @@ get_declarations :: (file: *Program_File, from_node: *Node = null, from_loc: *No
                 for decl: table_find_multiple(*linked_file.file.declarations, name) {
                     if is_global(decl, file, linked_file.file, linked_file.from_import) array_add(*new_globals, decl);
                 }
+
+                for linked_file.file.usings {
+                    if is_global(it, file, linked_file.file, linked_file.from_import) add_decls_from_using(*new_globals, it, name);
+                }
             }
 
             globals = new_globals;
@@ -838,41 +850,9 @@ get_declarations :: (file: *Program_File, from_node: *Node = null, from_loc: *No
                 continue;
             }
 
-            // -- Global using --
-            // We are accepting usings only from loaded files.
-            // if !linked_file.from_import {
-
-            //     // This is stupid!!
-            //     for linked_file.file.nodes {
-            //         if !is_global(it, file, linked_file.file, linked_file.from_import) {
-            //             continue;
-            //         }
-
-            //         if it.kind != .USING {
-            //             continue;
-            //         }
-
-            //         _using := cast(*Using, it);
-
-            //         if skip_using == _using {
-            //             continue;
-            //         }
-
-            //         if !_using.expression {
-            //             continue;
-            //         }
-
-            //         copied_using := skip_using;
-            //         skip_using = _using;
-
-            //         used_type := get_node_type(_using.expression);
-            //         if !used_type continue;
-
-            //         add_all_fields_of(*decls, used_type, name);
-
-            //         skip_using = copied_using;
-            //     }
-            // }
+            for linked_file.file.usings {
+                if is_global(it, file, linked_file.file, linked_file.from_import) add_decls_from_using(*decls, it, name);
+            }
 
             // We are searching for specific decl
             if name.count > 0 {
