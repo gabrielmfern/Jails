@@ -622,22 +622,8 @@ add_all_fields_of :: (decls: *[..]*Declaration, node: *Node, filter_name: string
 
             case .DIRECTIVE_AS; #through;
             case .USING; // @TODO: handle `using` modifiers like `except`, `only` and `map`.
-                used_expression := get_used_expression(member);
-                if !used_expression || used_expression.kind != .DECLARATION && used_expression.kind != .IDENTIFIER {
-                    continue;
-                }
-
-                used_type := get_node_type(used_expression);
-                if !used_type {
-                    continue;
-                }
-
-                if used_expression.kind == .DECLARATION {
-                    decl := cast(*Declaration) used_expression;
-                    if !filter_name || filter_name == decl.name array_add(decls, decl); // Add using expression
-                }
-
-                add_all_fields_of(decls, used_type, filter_name); // Add all fields includes with using
+                _using := unwrap_as(member);
+                if _using && _using.kind == .USING add_decls_from_using(decls, cast(*Using) _using, filter_name);
         }
     }
 }
@@ -646,12 +632,18 @@ add_all_fields_of :: (decls: *[..]*Declaration, node: *Node, filter_name: string
 expanding_usings: [..]*Using;
 
 add_decls_from_using :: (decls: *[..]*Declaration, _using: *Using, name: string) {
-    if array_find(expanding_usings, _using) || !_using.expression || _using.expression.kind != .IDENTIFIER return;
+    expression := unwrap_as(_using.expression);
+    if array_find(expanding_usings, _using) || !expression return;
 
     array_add(*expanding_usings, _using);
     defer pop(*expanding_usings);
 
-    used_type := get_node_type(_using.expression);
+    if expression.kind == .DECLARATION {
+        decl := cast(*Declaration) expression;
+        if !name || name == decl.name array_add(decls, decl);
+    }
+
+    used_type := get_node_type(expression);
     if !used_type return;
 
     add_all_fields_of(decls, used_type, name);
@@ -733,6 +725,7 @@ get_declarations_from_parent :: (decls: *[..]*Declaration, node: *Node, from_loc
             proc := cast(*Procedure) node;
 
             for arg: proc.arguments {
+                if arg.kind == .USING add_decls_from_using(decls, cast(*Using) arg, name);
                 if arg.kind != .DECLARATION continue;
                 decl := cast(*Declaration) arg;
 
@@ -784,7 +777,7 @@ get_declarations_from_parent :: (decls: *[..]*Declaration, node: *Node, from_loc
 
                 if it.kind == {
                     case .USING; // @TODO: solve crash when having two using
-                        add_decls_from_using(decls, cast(*Using) it, name);
+                        if !only_consts add_decls_from_using(decls, cast(*Using) it, name);
 
                     case .COMPOUND_DECLARATION;
                         comp_decl := cast(*Compound_Declaration) it;

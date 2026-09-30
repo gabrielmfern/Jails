@@ -600,6 +600,7 @@ main :: () {
 
     server.files_to_be_analyzed.allocator = context.default_allocator;
     resolving_decls.allocator = context.default_allocator;
+    expanding_usings.allocator = context.default_allocator;
 
     init_memory_files();
     defer deinit_memory_files();
